@@ -9,7 +9,6 @@
     .chip{border:1px solid #e5e7eb;padding:2px 8px;border-radius:9999px;font-size:12px}
     .card{background:#fff;border-radius:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);padding:20px}
     .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono','Courier New', monospace}
-    /* diff styles */
     #diffBox ins { background:#e6ffed; text-decoration:none; }
     #diffBox del { background:#ffeef0; text-decoration:none; }
     #diffBox span { background:transparent; }
@@ -69,14 +68,18 @@
           <ul id="suggested" class="list-disc pl-6 text-sm"></ul>
         </div>
         <div>
-          <h3 class="font-medium mb-2">Updated Resume</h3>
+          <div class="flex items-center justify-between">
+            <h3 class="font-medium mb-2">Updated Resume</h3>
+            <div class="flex items-center gap-3">
+              <div id="rewriteStatus" class="text-sm text-gray-600"></div>
+              <div id="rewriteScoreBox" class="text-sm"></div>
+            </div>
+          </div>
 
-          <!-- CHANGED: textarea -> div to support bold highlights -->
           <div id="rewritten"
                class="w-full h-80 p-3 border rounded-lg mono whitespace-pre-wrap overflow-auto bg-white"
                contenteditable="false" aria-label="Rewritten resume"></div>
 
-          <!-- diff controls -->
           <div class="mt-4 flex items-center gap-3">
             <button id="showDiffBtn" class="px-3 py-2 rounded-lg border text-sm">Show changes</button>
             <span id="diffHint" class="text-xs text-gray-500"></span>
@@ -97,8 +100,7 @@
   </div>
 
   <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
-  <!-- diff lib for visual changes -->
   <script src="https://unpkg.com/diff-match-patch"></script>
-  <script type="module" src="./js/main.js?v=3"></script>
+  <script type="module" src="./js/main.js?v=4"></script>
 </body>
 </html>

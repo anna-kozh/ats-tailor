@@ -1,4 +1,3 @@
-// js/main.js
 import { readDocxAsText, readTextFile, downloadText } from './utils.js';
 
 const el = {
@@ -19,6 +18,9 @@ const el = {
   showDiffBtn: document.getElementById('showDiffBtn'),
   diffBox: document.getElementById('diffBox'),
   diffHint: document.getElementById('diffHint'),
+  // NEW
+  rewriteStatus: document.getElementById('rewriteStatus'),
+  rewriteScoreBox: document.getElementById('rewriteScoreBox'),
 };
 
 let lastOriginal = '';
@@ -48,7 +50,7 @@ el.analyzeBtn.addEventListener('click', async () => {
   const jd = el.jdText.value.trim();
   if (!resume || !jd) return setStatus('Add both resume + JD.');
 
-  // Reset UI before new analyze
+  // Reset ONLY analyze panel
   el.scoreBox.innerHTML = '';
   el.chips.innerHTML = '';
   el.flags.textContent = '';
@@ -57,7 +59,7 @@ el.analyzeBtn.addEventListener('click', async () => {
   setStatus('Analyzing…');
   try {
     const data = await callFn('analyze', { resume, jd });
-    renderAnalysis(data);
+    renderAnalysisTo(el.scoreBox, el.chips, el.flags, data);
     setStatus('Done.');
   } catch (err) {
     console.error(err);
@@ -69,46 +71,41 @@ el.analyzeBtn.addEventListener('click', async () => {
 el.rewriteBtn.addEventListener('click', async () => {
   const resume = el.resumeText.value.trim();
   const jd = el.jdText.value.trim();
-  if (!resume || !jd) return setStatus('Add both resume + JD.');
+  if (!resume || !jd) return setRewriteStatus('Add both resume + JD.');
 
   const mode = document.querySelector('input[name="mode"]:checked')?.value || 'conservative';
 
-  // Clear rewritten + signal rescoring will come
+  // Clear only the Tailored area; DO NOT touch Analysis panel
   el.rewritten.innerHTML = '';
-  el.scoreBox.innerHTML = ''; // make room for new score
+  el.rewriteScoreBox.innerHTML = '';
+  setRewriteStatus('Rewriting…');
   hideDiff();
 
-  setStatus('Rewriting…');
   try {
     const data = await callFn('rewrite', { resume, jd, mode });
 
-    // Update suggestions from rewrite
     renderSuggestions(data.suggestions || []);
 
     lastOriginal = resume;
     lastRewritten = data.rewritten_resume || '';
 
-    // Bold new content inline
     if (lastRewritten) {
       const bolded = renderInlineBoldAdds(lastOriginal, lastRewritten);
       el.rewritten.innerHTML = bolded;
-      // Also update the plain resume textarea so user can iterate further if they want
+      // update textarea so next iteration compares from this version
       el.resumeText.value = lastRewritten;
     }
 
-    if (el.diffHint) el.diffHint.textContent = 'Green = added, red = removed. Toggle to view.';
-
-    // Force an immediate re-analyze of the rewritten text to show NEW score
+    // Immediately re-score but show the status/score NEXT TO "Updated Resume"
+    setRewriteStatus('Re-scoring…');
     if (lastRewritten) {
-      setStatus('Re-scoring…');
       const scored = await callFn('analyze', { resume: lastRewritten, jd });
-      renderAnalysis(scored);
+      renderCompactScore(el.rewriteScoreBox, scored);
     }
-
-    setStatus('Done.');
+    setRewriteStatus('');
   } catch (err) {
     console.error(err);
-    setStatus('Error: ' + (err.message || 'unknown'));
+    setRewriteStatus('Error: ' + (err.message || 'unknown'));
   }
 });
 
@@ -116,7 +113,7 @@ el.rewriteBtn.addEventListener('click', async () => {
 el.showDiffBtn.addEventListener('click', () => {
   const base = lastOriginal || el.resumeText.value.trim();
   const revised = lastRewritten || stripHtml(el.rewritten.innerHTML);
-  if (!base || !revised) return setStatus('No baseline to compare.');
+  if (!base || !revised) return setRewriteStatus('No baseline to compare.');
 
   if (el.diffBox.classList.contains('hidden')) {
     el.diffBox.innerHTML = renderDiffHtml(base, revised);
@@ -136,18 +133,18 @@ function hideDiff() {
 /* ---------- Copy / Download ---------- */
 el.copyBtn.addEventListener('click', async () => {
   const text = el.rewritten.innerText || '';
-  if (!text.trim()) return setStatus('Nothing to copy.');
+  if (!text.trim()) return setRewriteStatus('Nothing to copy.');
   try {
     await navigator.clipboard.writeText(text);
-    setStatus('Copied.');
+    setRewriteStatus('Copied.');
   } catch {
-    setStatus('Copy failed.');
+    setRewriteStatus('Copy failed.');
   }
 });
 
 el.downloadBtn.addEventListener('click', () => {
   const text = el.rewritten.innerText || '';
-  if (!text.trim()) return setStatus('Nothing to download.');
+  if (!text.trim()) return setRewriteStatus('Nothing to download.');
   downloadText('rewritten-resume.txt', text);
 });
 
@@ -166,17 +163,24 @@ async function callFn(action, payload) {
 }
 
 /* ---------- Render helpers ---------- */
-function renderAnalysis(data) {
+function renderAnalysisTo(scoreBoxEl, chipsEl, flagsEl, data) {
   const capText = data.capped_reason ? ` (capped: ${escapeHtml(data.capped_reason)})` : '';
   const score = Math.round(Number(data.match_score || 0));
-  el.scoreBox.innerHTML = `<div class="text-base">Match score: <span class="font-semibold">${score}</span>/100${capText}</div>`;
+  scoreBoxEl.innerHTML = `<div class="text-base">Match score: <span class="font-semibold">${score}</span>/100${capText}</div>`;
 
-  const chips = [];
-  for (const t of data.missing_required || []) chips.push(`<span class="chip">${escapeHtml(t)}</span>`);
-  for (const t of data.missing_nice || []) chips.push(`<span class="chip">${escapeHtml(t)}</span>`);
-  el.chips.innerHTML = chips.join(' ') || '<span class="text-xs text-gray-500">No gaps flagged.</span>';
+  if (chipsEl) {
+    const chips = [];
+    for (const t of data.missing_required || []) chips.push(`<span class="chip">${escapeHtml(t)}</span>`);
+    for (const t of data.missing_nice || []) chips.push(`<span class="chip">${escapeHtml(t)}</span>`);
+    chipsEl.innerHTML = chips.join(' ') || '<span class="text-xs text-gray-500">No gaps flagged.</span>';
+  }
+  if (flagsEl) flagsEl.textContent = (data.flags || []).join(' · ') || '';
+}
 
-  el.flags.textContent = (data.flags || []).join(' · ') || '';
+function renderCompactScore(target, data) {
+  const score = Math.round(Number(data.match_score || 0));
+  const cap = data.capped_reason ? ` <span class="text-xs text-gray-500">(capped: ${escapeHtml(data.capped_reason)})</span>` : '';
+  target.innerHTML = `<span class="font-medium">New match score:</span> <span class="font-semibold">${score}</span>/100${cap}`;
 }
 
 function renderSuggestions(list) {
@@ -189,6 +193,8 @@ function renderSuggestions(list) {
 }
 
 function setStatus(m) { el.status.textContent = m || ''; }
+function setRewriteStatus(m) { el.rewriteStatus.textContent = m || ''; }
+
 function escapeHtml(s) {
   return String(s || '')
     .replace(/&/g, '&amp;')
@@ -209,9 +215,8 @@ function renderInlineBoldAdds(original, rewritten) {
 
   const out = [];
   for (const [op, text] of diffs) {
-    if (op === 1) out.push('<strong>' + escapeHtml(text) + '</strong>'); // added
-    else if (op === 0) out.push(escapeHtml(text)); // unchanged
-    // deletions omitted in inline view
+    if (op === 1) out.push('<strong>' + escapeHtml(text) + '</strong>');
+    else if (op === 0) out.push(escapeHtml(text));
   }
   return out.join('');
 }
@@ -223,8 +228,8 @@ function renderDiffHtml(original, rewritten) {
 
   const frag = [];
   for (const [op, text] of diffs) {
-    if (op === -1) frag.push('<del>' + escapeHtml(text) + '</del>');      // red
-    else if (op === 1) frag.push('<ins>' + escapeHtml(text) + '</ins>');  // green
+    if (op === -1) frag.push('<del>' + escapeHtml(text) + '</del>');
+    else if (op === 1) frag.push('<ins>' + escapeHtml(text) + '</ins>');
     else frag.push('<span>' + escapeHtml(text) + '</span>');
   }
   return frag.join('');
