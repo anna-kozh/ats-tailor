@@ -1,63 +1,75 @@
-// netlify/functions/tailor.js
+// netlify/functions/tailor.js (CommonJS & robust error handling)
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4o-mini';
 const FETCH_TIMEOUT_MS = 8500;
-const MAX_TOKENS = 1400;
+const MAX_TOKENS = 1200;
+const MAX_CHARS = 18000; // trim very large pastes to avoid timeouts
 
-export default async function handler(req) {
-  if (req.method !== 'POST') return json({ error: 'Use POST' }, 405);
-  if (!OPENAI_API_KEY) return json({ error: 'Missing OPENAI_API_KEY' }, 500);
+exports.handler = async (event) => {
+  try {
+    if (event.httpMethod !== 'POST') return json({ error: 'Use POST' }, 405);
+    if (!OPENAI_API_KEY) return json({ error: 'Missing OPENAI_API_KEY' }, 500);
 
-  const body = await readJson(req);
-  const { action } = body || {};
-  if (!action) return json({ error: 'Missing action' }, 400);
+    let body = {};
+    try { body = JSON.parse(event.body || '{}'); } catch { body = {}; }
+    const action = body.action;
 
-  if (action === 'analyze') {
-    const { resume = '', jd = '' } = body || {};
-    if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
-    const score = await scorePair(resume, jd);
-    return json({ match_score: score });
+    if (!action) return json({ error: 'Missing action' }, 400);
+
+    if (action === 'analyze') {
+      const resume = (body.resume || '').slice(0, MAX_CHARS);
+      const jd = (body.jd || '').slice(0, MAX_CHARS);
+      if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
+      const score = await scorePair(resume, jd);
+      return json({ match_score: score });
+    }
+
+    if (action === 'rewrite_full') {
+      const resume = (body.resume || '').slice(0, MAX_CHARS);
+      const jd = (body.jd || '').slice(0, MAX_CHARS);
+      if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
+
+      const score_v1 = await scorePair(resume, jd);
+      const gaps = await findGaps(resume, jd);
+      const v2 = await rewritePass(resume, jd, gaps);
+      const base = v2 || resume;
+      const score_v2 = await scorePair(base, jd);
+      const missing_after = await findGaps(base, jd);
+
+      return json({
+        score_v1,
+        rewritten_resume_v2: base,
+        score_v2,
+        missing_keywords: missing_after,
+        target: 95
+      });
+    }
+
+    if (action === 'apply_keywords') {
+      const resume = (body.resume || '').slice(0, MAX_CHARS);
+      const jd = (body.jd || '').slice(0, MAX_CHARS);
+      const keywords = Array.isArray(body.keywords) ? body.keywords.map(s => String(s).trim()).filter(Boolean).slice(0, 30) : [];
+      if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
+
+      const v3 = await applyKeywordsSpread(resume, jd, keywords);
+      const base = v3 || resume;
+      const score_v3 = await scorePair(base, jd);
+      const remaining = await findGaps(base, jd);
+
+      return json({
+        rewritten_resume: base,
+        final_score: score_v3,
+        remaining_keywords: remaining,
+        target: 95
+      });
+    }
+
+    return json({ error: 'Unknown action' }, 400);
+  } catch (err) {
+    return json({ error: 'Function crash', detail: String(err && err.message || err) }, 502);
   }
-
-  if (action === 'rewrite_full') {
-    const { resume = '', jd = '' } = body || {};
-    if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
-
-    const score_v1 = await scorePair(resume, jd);
-    const gaps = await findGaps(resume, jd);
-    const v2 = await rewritePass(resume, jd, gaps);
-    const score_v2 = await scorePair(v2 || resume, jd);
-    const missing_after = await findGaps(v2 || resume, jd);
-
-    return json({
-      score_v1,
-      rewritten_resume_v2: v2 || resume,
-      score_v2,
-      missing_keywords: missing_after,
-      target: 95
-    });
-  }
-
-  if (action === 'apply_keywords') {
-    const { resume = '', jd = '', keywords = [] } = body || {};
-    if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
-    const cleaned = Array.isArray(keywords) ? keywords.map(s => String(s).trim()).filter(Boolean).slice(0, 30) : [];
-
-    const v3 = await applyKeywordsSpread(resume, jd, cleaned);
-    const score_v3 = await scorePair(v3 || resume, jd);
-    const remaining = await findGaps(v3 || resume, jd);
-
-    return json({
-      rewritten_resume: v3 || resume,
-      final_score: score_v3,
-      remaining_keywords: remaining,
-      target: 95
-    });
-  }
-
-  return json({ error: 'Unknown action' }, 400);
-}
+};
 
 /* ---------- Model helpers ---------- */
 async function scorePair(resume, jd) {
@@ -68,7 +80,7 @@ async function scorePair(resume, jd) {
     'Penalize fluff and claims not present in the resume text.'
   ].join(' ');
   const user = JSON.stringify({ resume, jd });
-  const data = await openAI({
+  const data = await openAIStrict({
     model: MODEL,
     messages: [
       { role: 'system', content: system },
@@ -87,7 +99,7 @@ async function findGaps(resume, jd) {
     'Focus on tools, frameworks, domains, certifications, and exact phrases. No soft skills.'
   ].join(' ');
   const user = JSON.stringify({ resume, jd });
-  const data = await openAI({
+  const data = await openAIStrict({
     model: MODEL,
     messages: [
       { role: 'system', content: system },
@@ -109,7 +121,7 @@ async function rewritePass(resume, jd, gaps = []) {
     'Return ONLY JSON: { "rewritten_resume": string }.'
   ].join(' ');
   const user = JSON.stringify({ resume, jd });
-  const data = await openAI({
+  const data = await openAIStrict({
     model: MODEL,
     messages: [
       { role: 'system', content: system },
@@ -132,7 +144,7 @@ async function applyKeywordsSpread(resume, jd, keywords = []) {
     'Return ONLY JSON: { "rewritten_resume": string }.'
   ].join(' ');
   const user = JSON.stringify({ resume, jd, keywords });
-  const data = await openAI({
+  const data = await openAIStrict({
     model: MODEL,
     messages: [
       { role: 'system', content: system },
@@ -146,7 +158,7 @@ async function applyKeywordsSpread(resume, jd, keywords = []) {
 }
 
 /* ---------- HTTP & Util ---------- */
-async function openAI(payload) {
+async function openAIStrict(payload) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(new Error('timeout')), FETCH_TIMEOUT_MS);
   try {
@@ -156,18 +168,18 @@ async function openAI(payload) {
       body: JSON.stringify(payload),
       signal: controller.signal
     });
-    if (!res.ok) {
-      const text = await res.text().catch(()=>'');
-      throw new Error(`OpenAI ${res.status}: ${text}`);
-    }
-    const j = await res.json();
-    const content = j?.choices?.[0]?.message?.content?.trim() || '{}';
+    const text = await res.text();
+    if (!res.ok) throw new Error(`OpenAI ${res.status}: ${text}`);
+    let content = text;
+    try {
+      const j = JSON.parse(text);
+      content = j?.choices?.[0]?.message?.content?.trim() || '{}';
+    } catch {}
     try { return JSON.parse(content); } catch { return {}; }
   } finally { clearTimeout(t); }
 }
 
-function json(body, status=200){
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type':'application/json' } });
+function json(body, statusCode=200){
+  return { statusCode, headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body) };
 }
-async function readJson(req){ try { return JSON.parse(await req.text()); } catch { return {}; } }
 function clamp(n, mn, mx, fb=0){ const v = Number(n); return Number.isFinite(v) ? Math.min(mx, Math.max(mn, v)) : fb; }
