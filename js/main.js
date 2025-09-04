@@ -1,5 +1,6 @@
 import { readDocxAsText, readTextFile, downloadText } from './utils.js';
-import { initModels, extractJD, generateRewrite } from './llm.js?v=5';
+import { initModels, extractJD, generateRewrite } from './llm.js?v=6';
+
 
 import { scoreResume } from './scoring.js';
 

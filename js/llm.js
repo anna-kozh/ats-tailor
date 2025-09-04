@@ -1,5 +1,24 @@
+
+
 // js/llm.js — runs fully in-browser (no keys/servers)
 import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+
+// ✅ Use a stable ORT version + allow non-SIMD fallback
+env.backends.onnx.wasm = {
+  wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.1/dist/',
+  simd: true,        // try SIMD first
+  numThreads: 1,     // avoid SharedArrayBuffer requirements
+};
+
+// Always fetch models remotely (avoid /models 404)
+env.allowLocalModels = false;
+// Cache model files in the browser
+env.useBrowserCache = true;
+
+// …(keep the rest of the file exactly as you have it now: LaMini-Flan-T5 + MiniLM)
+
+
+
 
 // ✅ correct ONNX Runtime WASM files (needed for browser inference)
 env.backends.onnx.wasm.wasmPaths =
