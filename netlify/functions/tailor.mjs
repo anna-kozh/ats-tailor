@@ -4,8 +4,8 @@ const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4o-mini';
 
 // Keep things fast + stable
-const FETCH_TIMEOUT_MS = 20000;   // 20s total request budget
-const MAX_TOKENS_REWRITE = 1800;  // fits ≤2 pages comfortably
+const FETCH_TIMEOUT_MS = 25000;   // 20s total request budget
+const MAX_TOKENS_REWRITE = 1400;  // fits ≤2 pages comfortably
 
 /** ==============================
  *  HTTP entry

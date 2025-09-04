@@ -17,11 +17,13 @@ const el = {
   diffBox: document.getElementById('diffBox'),
   diffHint: document.getElementById('diffHint'),
   copyBtn: document.getElementById('copyBtn'),
-  downloadBtn: document.getElementById('downloadBtn'),
+  downloadBtn: document.getElementById('downloadBtn')
 };
 
 let lastOriginal = '';
 let lastRewritten = '';
+// debug mirror so we can introspect in console
+window._ats = { lastOriginal: '', lastRewritten: '' };
 
 /* ---------------- File uploads ---------------- */
 el.resumeFile?.addEventListener('change', async (e) => {
@@ -50,8 +52,7 @@ el.analyzeBtn.addEventListener('click', async () => {
   try {
     const data = await callFn('analyze', { resume, jd });
     const score = Math.round(Number(data?.match_score ?? 0));
-    el.scoreBox.innerHTML =
-      `<div class="text-base">Match score: <span class="font-semibold">${score}</span>/100</div>`;
+    el.scoreBox.innerHTML = `<div class="text-base">Match score: <span class="font-semibold">${score}</span>/100</div>`;
     setStatus('Done.');
   } catch (err) {
     console.error(err);
@@ -65,6 +66,11 @@ el.rewriteBtn.addEventListener('click', async () => {
   const jd = el.jdText.value.trim();
   if (!resume || !jd) return setRewriteStatus('Add both resume + JD.');
 
+  // capture original immediately so Show changes works even if request fails
+  lastOriginal = String(resume || '');
+  lastRewritten = ''; // will fill after response
+  window._ats = { lastOriginal, lastRewritten };
+
   el.rewritten.innerHTML = '';
   el.rewriteScoreBox.innerHTML = '';
   hideDiff();
@@ -73,12 +79,11 @@ el.rewriteBtn.addEventListener('click', async () => {
   try {
     const data = await callFn('rewrite', { resume, jd });
 
-    // Safe defaults
-    lastOriginal = String(resume || '');
     const serverText = (data && typeof data.rewritten_resume === 'string') ? data.rewritten_resume : '';
-    lastRewritten = serverText.trim() ? serverText : lastOriginal;
+    lastRewritten = (serverText && serverText.trim()) ? serverText : lastOriginal;
+    window._ats = { lastOriginal, lastRewritten };
 
-    // Render inline bold adds (never crash)
+    // render inline bold adds; never crash
     try {
       const html = renderInlineBoldAdds(lastOriginal, lastRewritten);
       el.rewritten.innerHTML = html || escapeHtml(lastRewritten);
@@ -87,7 +92,7 @@ el.rewriteBtn.addEventListener('click', async () => {
       el.rewritten.textContent = lastRewritten;
     }
 
-    // Score (prefer server)
+    // prefer server score; otherwise rescore
     const serverScore = Number.isFinite(Number(data?.final_score)) ? Number(data.final_score) : null;
     if (serverScore !== null) {
       renderCompactScore(el.rewriteScoreBox, { match_score: serverScore });
@@ -96,7 +101,7 @@ el.rewriteBtn.addEventListener('click', async () => {
       renderCompactScore(el.rewriteScoreBox, scored || { match_score: 0 });
     }
 
-    // IMPORTANT: keep original textarea unchanged (do NOT overwrite)
+    // IMPORTANT: do NOT overwrite original textarea
     // el.resumeText.value = lastRewritten;
 
     setRewriteStatus('Done.');
@@ -116,12 +121,14 @@ el.showDiffBtn.addEventListener('click', () => {
   if (el.diffBox.classList.contains('hidden')) {
     try {
       const html = renderDiffHtml(base, revised);
-      el.diffBox.innerHTML = html && html.trim() ? html : escapeHtml(revised); // fallback non-empty
+      // fallback to plain text if diff lib returns empty/whitespace
+      el.diffBox.innerHTML = html && html.trim() ? html : escapeHtml(revised);
     } catch (e) {
       console.warn('diff render failed; showing plain text', e);
       el.diffBox.textContent = revised;
     }
     el.diffBox.classList.remove('hidden');
+    el.diffBox.style.display = 'block'; // extra guard
     el.showDiffBtn.textContent = 'Hide changes';
   } else {
     hideDiff();
@@ -130,6 +137,7 @@ el.showDiffBtn.addEventListener('click', () => {
 function hideDiff() {
   el.diffBox.classList.add('hidden');
   el.diffBox.innerHTML = '';
+  el.diffBox.style.display = ''; // reset
   el.showDiffBtn.textContent = 'Show changes';
 }
 
