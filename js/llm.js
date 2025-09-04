@@ -1,15 +1,15 @@
-// js/llm.js — runs fully in-browser (no keys/servers)
+// js/llm.js — runs fully in-browser (safe for GitHub Pages)
 import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
 
-// Force ONNX Runtime to the safest WASM config (works on GitHub Pages)
+// ✅ Force safest ONNX Runtime WASM settings (no SIMD, single-thread, main thread)
 env.backends.onnx.wasm = {
-  wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.1/dist/',
-  simd: false,      // turn OFF SIMD to avoid CPU feature/CORS isolation issues
-  numThreads: 1,    // single-thread (avoids SharedArrayBuffer)
-  proxy: false      // run in main thread (no worker requirements)
+  wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/',
+  simd: false,       // disable SIMD (fixes buffer errors)
+  numThreads: 1,     // single-thread, avoids SharedArrayBuffer
+  proxy: false       // run on main thread, no worker required
 };
 
-// Always fetch models remotely + cache locally
+// Always fetch models remotely, cache locally
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
