@@ -1,36 +1,35 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Resume Tailor — 100% client-side</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Resume Tailor — OpenAI (Netlify)</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    .chip { border: 1px solid #e5e7eb; padding: 2px 8px; border-radius: 9999px; font-size: 12px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .card { background:#fff; border-radius:16px; box-shadow:0 1px 4px rgba(0,0,0,.06); padding:20px; }
+    .chip{border:1px solid #e5e7eb;padding:2px 8px;border-radius:9999px;font-size:12px}
+    .card{background:#fff;border-radius:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);padding:20px}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono','Courier New', monospace}
   </style>
 </head>
 <body class="bg-gray-50 text-gray-900">
   <div class="max-w-7xl mx-auto p-6 space-y-6">
     <header class="flex items-center justify-between">
-      <h1 class="text-2xl font-bold">Resume Tailor (Free & Local)</h1>
-      <div class="text-xs text-gray-600">Runs in your browser. No server. No keys.</div>
+      <h1 class="text-2xl font-bold">Resume Tailor (OpenAI)</h1>
+      <span class="text-xs text-gray-600">Private: your key stays on Netlify</span>
     </header>
 
     <section class="grid grid-cols-1 lg:grid-cols-3 gap-5">
       <div class="card space-y-3">
         <h2 class="font-semibold">Resume</h2>
         <input id="resumeFile" type="file" accept=".docx,.txt" class="block w-full text-sm">
-        <textarea id="resumeText" class="w-full h-64 p-3 border rounded-lg" placeholder="Paste resume text here"></textarea>
-        <div class="text-xs text-gray-500">Tip: .docx parses best. Fancy templates may lose structure.</div>
+        <textarea id="resumeText" class="w-full h-64 p-3 border rounded-lg" placeholder="Paste resume text"></textarea>
+        <p class="text-xs text-gray-500">Tip: .docx parses best.</p>
       </div>
 
       <div class="card space-y-3">
         <h2 class="font-semibold">Job Description</h2>
         <input id="jdFile" type="file" accept=".docx,.txt" class="block w-full text-sm">
-        <textarea id="jdText" class="w-full h-64 p-3 border rounded-lg" placeholder="Paste the job description here"></textarea>
-        <div class="text-xs text-gray-500">Add complete JD text. The analysis extracts must-haves automatically.</div>
+        <textarea id="jdText" class="w-full h-64 p-3 border rounded-lg" placeholder="Paste the JD here"></textarea>
       </div>
 
       <div class="card space-y-4">
@@ -76,13 +75,11 @@
     </section>
 
     <footer class="text-xs text-gray-500 py-6">
-      Powered by <a class="underline" href="https://github.com/xenova/transformers.js" target="_blank">Transformers.js</a> and <a class="underline" href="https://github.com/mwilliamson/mammoth.js" target="_blank">Mammoth</a>. All processing happens locally in your browser.
+      Serverless call: <code>/.netlify/functions/tailor</code>. No data stored.
     </footer>
   </div>
 
   <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
-<script type="module" src="./js/main.js?v=9"></script>
-
-
+  <script type="module" src="./js/main.js?v=1"></script>
 </body>
 </html>
