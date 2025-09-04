@@ -2,8 +2,7 @@
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4o-mini';
-const FETCH_TIMEOUT_MS = 10000;
-const MAX_TOKENS_REWRITE = 1400;
+const FETCH_TIMEOUT_MS = 30000; // bump to 30s
 
 export default async function handler(req) {
   if (req.method !== 'POST') return json({ error: 'Use POST' }, 405);
@@ -23,17 +22,14 @@ export default async function handler(req) {
   if (action === 'rewrite') {
     const { resume = '', jd = '' } = body || {};
     if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
-
     const gaps = await findGaps(resume, jd);
     const rewritten = await rewritePass(resume, jd, gaps);
     const score = await scorePair(rewritten || resume, jd);
     const missingAfter = await findGaps(rewritten || resume, jd);
-
     return json({
       rewritten_resume: rewritten || resume,
       final_score: score,
-      missing_keywords: missingAfter,
-      suggested_skills_section: buildSuggestedSkillsBlock(missingAfter)
+      missing_keywords: missingAfter
     });
   }
 
@@ -41,26 +37,24 @@ export default async function handler(req) {
     const { resume_v2 = '', jd = '', approved_keywords = [] } = body || {};
     if (!resume_v2 || !jd) return json({ error: 'Missing resume_v2 or jd' }, 400);
 
-    let working = resume_v2;
+    // Pass 1
+    const initialMissing = await findGaps(resume_v2, jd);
+    const merged = Array.from(new Set([...(approved_keywords||[]), ...initialMissing])).slice(0, 30);
+    let working = await rewritePass(resume_v2, jd, merged);
     let score = await scorePair(working, jd);
-    let missing = await findGaps(working, jd);
 
-    // Merge user-approved keywords first
-    let seed = Array.isArray(approved_keywords) ? approved_keywords : [];
-
-    // Try up to 3 passes to reach >=95
-    for (let i = 0; i < 3 && score < 95; i++) {
-      const gaps = Array.from(new Set([...(seed||[]), ...(missing||[])])).slice(0, 30);
-      working = await rewritePass(working, jd, gaps);
+    // Optional Pass 2 (only if needed)
+    if (score < 95) {
+      const secondMissing = await findGaps(working, jd);
+      const merged2 = Array.from(new Set([...(approved_keywords||[]), ...secondMissing])).slice(0, 30);
+      working = await rewritePass(working, jd, merged2);
       score = await scorePair(working, jd);
-      missing = await findGaps(working, jd);
+      const after = await findGaps(working, jd);
+      return json({ final_resume: working, final_score: score, missing_keywords_after: after.slice(0,24) });
+    } else {
+      const after = await findGaps(working, jd);
+      return json({ final_resume: working, final_score: score, missing_keywords_after: after.slice(0,24) });
     }
-
-    return json({
-      final_resume: working,
-      final_score: score,
-      missing_keywords_after: missing.slice(0, 24)
-    });
   }
 
   return json({ error: 'Unknown action' }, 400);
@@ -85,7 +79,8 @@ async function scorePair(resume, jd) {
     top_p: 1,
     response_format: { type: 'json_object' }
   });
-  return clamp(Number(data?.match_score), 0, 100, 0);
+  const v = Number(data?.match_score);
+  return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 0;
 }
 
 async function findGaps(resume, jd) {
@@ -113,7 +108,7 @@ async function findGaps(resume, jd) {
 async function rewritePass(resume, jd, gaps = []) {
   const system = [
     'You are an expert ATS resume tailor. Maximize truthful overlap with the JD without fabrication.',
-    'Rewrite into a concise, metric-heavy resume (≤1200 words).',
+    'Rewrite into a concise, metric-heavy resume (≤1000 words).',
     'Include a short top section titled "Skills & Tools Match" listing exact JD phrases you can truthfully claim.',
     'Use exact JD phrasing naturally in bullets and headings; avoid obvious keyword stuffing.',
     'Keep employers and dates intact; edit wording for clarity and impact.',
@@ -131,15 +126,9 @@ async function rewritePass(resume, jd, gaps = []) {
     temperature: 0.4,
     top_p: 1,
     response_format: { type: 'json_object' },
-    max_tokens: MAX_TOKENS_REWRITE
+    max_tokens: 1000
   });
   return String(data?.rewritten_resume || '').trim();
-}
-
-function buildSuggestedSkillsBlock(missingKeywords = []) {
-  if (!Array.isArray(missingKeywords) || missingKeywords.length === 0) return '';
-  const list = [...new Set(missingKeywords)].slice(0, 24).join(' · ');
-  return `Skills & Tools Match:\n${list}`;
 }
 
 async function openAI(payload) {
@@ -168,4 +157,3 @@ function json(body, status=200){
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 async function readJson(req){ try { return JSON.parse(await req.text()); } catch { return {}; } }
-function clamp(n, min, max, fb=0){ const v = Number(n); return Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fb; }
