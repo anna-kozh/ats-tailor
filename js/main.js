@@ -1,4 +1,4 @@
-// Only changes: use backend-returned final_score after rewrite (faster, matches new algorithm)
+// js/main.js
 import { readDocxAsText, readTextFile, downloadText } from './utils.js';
 
 const el = {
@@ -19,7 +19,7 @@ const el = {
   showDiffBtn: document.getElementById('showDiffBtn'),
   diffBox: document.getElementById('diffBox'),
   diffHint: document.getElementById('diffHint'),
-  // NEW:
+  // NEW
   rewriteStatus: document.getElementById('rewriteStatus'),
   rewriteScoreBox: document.getElementById('rewriteScoreBox'),
 };
@@ -94,14 +94,17 @@ el.rewriteBtn.addEventListener('click', async () => {
       el.resumeText.value = lastRewritten; // allow further iteration
     }
 
+    // Prefer backend-provided final_score; fallback to client analyze
     if (typeof data.final_score === 'number') {
       renderCompactScore(el.rewriteScoreBox, { match_score: data.final_score, capped_reason: null });
       setRewriteStatus('');
-    } else {
+    } else if (lastRewritten) {
       setRewriteStatus('Re-scoring…');
       const scored = await callFn('analyze', { resume: lastRewritten, jd });
       renderCompactScore(el.rewriteScoreBox, scored);
       setRewriteStatus('');
+    } else {
+      setRewriteStatus('No rewritten text.');
     }
 
     if (el.diffHint) el.diffHint.textContent = 'Green = added, red = removed. Toggle to view.';
@@ -150,7 +153,10 @@ async function callFn(action, payload) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, ...payload })
   });
-  if (!res.ok) throw new Error(await res.text().catch(() => `HTTP ${res.status}`));
+  if (!res.ok) {
+    const t = await res.text().catch(() => `HTTP ${res.status}`);
+    throw new Error(`HTTP ${res.status} ${t}`);
+  }
   return res.json();
 }
 function renderAnalysis(data) {

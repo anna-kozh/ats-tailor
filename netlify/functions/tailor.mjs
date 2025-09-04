@@ -2,10 +2,9 @@
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4o-mini';
-
-// Targets/toggles
-const TARGET_SCORE = 95;         // aim for >=95 if possible without fabrication
-const MAX_IMPROVE_PASSES = 2;    // number of refine loops after first rewrite
+const TARGET_SCORE = 95;
+const MAX_IMPROVE_PASSES = 2;
+const FETCH_TIMEOUT_MS = 25000;
 
 export default async function handler(req) {
   try {
@@ -27,17 +26,12 @@ export default async function handler(req) {
       const { resume = '', jd = '', mode = 'conservative' } = body || {};
       if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
 
-      // baseline analysis
       const baseline = await analyzeResume(resume, jd);
-
-      // first rewrite using gaps
       let { rewritten_resume, suggestions } = await rewriteResume(resume, jd, mode, baseline);
       if (!rewritten_resume || !rewritten_resume.trim()) rewritten_resume = resume;
 
-      // analyze rewritten
       let current = await analyzeResume(rewritten_resume, jd);
 
-      // refine loop up to MAX_IMPROVE_PASSES
       let passes = 0;
       while (current.match_score < TARGET_SCORE && passes < MAX_IMPROVE_PASSES) {
         const improved = await improveResume({
@@ -54,7 +48,7 @@ export default async function handler(req) {
           current = await analyzeResume(rewritten_resume, jd);
           passes++;
         } else {
-          break; // model couldn’t improve without fabricating
+          break;
         }
       }
 
@@ -78,7 +72,6 @@ export default async function handler(req) {
 /* ---------------- analyzers & rewriters ---------------- */
 
 async function analyzeResume(resume, jd) {
-  // Scoring rubric skews toward JD term coverage + responsibility alignment; no fabrication
   const system = [
     'You are an ATS evaluator.',
     'Score 0–100 how well the resume matches the job description.',
@@ -164,7 +157,8 @@ async function improveResume({ original, current, jd, mode, currentScore, missin
   const system = [
     'You are refining a resume to raise ATS score further WITHOUT fabricating.',
     'Prefer minimal edits with maximum keyword/role alignment and metrics.',
-    'If required skills are missing and not in the original, do NOT add them.'
+    'If required skills are missing and not in the original, do NOT add them.',
+    'Return json with the single key "rewritten_resume".'
   ].join(' ');
 
   const user = JSON.stringify({
@@ -194,11 +188,16 @@ async function improveResume({ original, current, jd, mode, currentScore, missin
 /* ---------------- low-level helpers ---------------- */
 
 async function openAI(payload) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort('timeout'), FETCH_TIMEOUT_MS);
+
   const res = await fetch(OPENAI_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
+    body: JSON.stringify(payload),
+    signal: controller.signal
+  }).finally(() => clearTimeout(t));
+
   if (!res.ok) throw new Error(`OpenAI ${res.status}: ${await res.text().catch(() => '')}`);
 
   const json = await res.json();

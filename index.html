@@ -9,6 +9,7 @@
     .chip{border:1px solid #e5e7eb;padding:2px 8px;border-radius:9999px;font-size:12px}
     .card{background:#fff;border-radius:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);padding:20px}
     .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono','Courier New', monospace}
+    /* diff styles */
     #diffBox ins { background:#e6ffed; text-decoration:none; }
     #diffBox del { background:#ffeef0; text-decoration:none; }
     #diffBox span { background:transparent; }
@@ -76,10 +77,12 @@
             </div>
           </div>
 
+          <!-- textarea -> div to support bold highlights -->
           <div id="rewritten"
                class="w-full h-80 p-3 border rounded-lg mono whitespace-pre-wrap overflow-auto bg-white"
                contenteditable="false" aria-label="Rewritten resume"></div>
 
+          <!-- diff controls -->
           <div class="mt-4 flex items-center gap-3">
             <button id="showDiffBtn" class="px-3 py-2 rounded-lg border text-sm">Show changes</button>
             <span id="diffHint" class="text-xs text-gray-500"></span>
@@ -100,7 +103,8 @@
   </div>
 
   <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
-  <script src="https://unpkg.com/diff-match-patch"></script>
-  <script type="module" src="./js/main.js?v=4"></script>
+  <!-- correct browser build -->
+  <script src="https://unpkg.com/diff-match-patch@1.0.5/diff_match_patch.js"></script>
+  <script type="module" src="./js/main.js?v=5"></script>
 </body>
 </html>
