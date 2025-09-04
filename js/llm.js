@@ -1,41 +1,37 @@
-// js/llm.js — runs fully in-browser with Transformers.js (no keys, no server)
+// js/llm.js — runs fully in-browser (no keys/servers)
 import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
 
-// Force remote model downloads (avoid 404s from local /models path)
+// ✅ correct ONNX Runtime WASM files (needed for browser inference)
+env.backends.onnx.wasm.wasmPaths =
+  'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/';
+
+// don’t look for local /models; always fetch from Hugging Face
 env.allowLocalModels = false;
-// (Optional) cache in browser storage for faster reloads
+// cache model files in the browser for faster reloads
 env.useBrowserCache = true;
 
-// Optional ONNX runtime path (stable CDN)
-env.backends.onnx.wasm.wasmPaths =
-  'https://cdn.jsdelivr.net/npm/@xenova/onnxruntime-web@1.18.0/dist/';
-
-let embedder = null;          // for semantic similarity
-let generator = null;         // for rewriting + extracting JD
+let embedder = null;   // semantic similarity (Analyze)
+let generator = null;  // rewriting + JD extraction (Rewrite)
 
 export async function initModels() {
-  // Load embeddings model only (fast) for Analyze step
   if (!embedder) {
     embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
   }
 }
 
-// Load a SMALL, supported text2text model for browser use
 async function ensureGenerator() {
   if (!generator) {
-    // LaMini-Flan-T5 is well supported for text2text-generation in the browser
+    // use a browser-friendly text2text model (not text-generation)
     generator = await pipeline('text2text-generation', 'Xenova/LaMini-Flan-T5-248M');
   }
 }
 
-// Convenience: embed multiple strings (returns array of vectors)
 export async function embedTexts(texts) {
   await initModels();
   const out = await embedder(texts, { normalize: true, pooling: 'mean' });
   return Array.isArray(out.data[0]) ? out.data : [out.data];
 }
 
-// Extract must-haves and nice-to-haves from JD into strict JSON
 export async function extractJD(jd) {
   await ensureGenerator();
 
@@ -60,20 +56,22 @@ ${jd}`;
   try {
     parsed = JSON.parse(m ? m[0] : text);
   } catch {
-    // Fallback: naive keyword split
+    // fallback: naive keyword split if model returns non-JSON
     const lines = jd.split(/\n|\.|;|,/).map(s => s.trim()).filter(Boolean);
-    const kw = lines.filter(s => /required|must|need|proficient|experience|with|in/i.test(s)).slice(0, 16);
+    const kw = lines
+      .filter(s => /required|must|need|proficient|experience|with|in/i.test(s))
+      .slice(0, 16);
     parsed.must_have = kw.slice(0, 8);
     parsed.nice = kw.slice(8, 16);
   }
 
   const clean = t => String(t || '').toLowerCase().replace(/^[\-•\s]+/, '').trim();
   parsed.must_have = [...new Set((parsed.must_have || []).map(clean).filter(Boolean))];
-  parsed.nice = [...new Set((parsed.nice || []).map(clean).filter(Boolean))];
+  parsed.nice      = [...new Set((parsed.nice      || []).map(clean).filter(Boolean))];
+
   return parsed;
 }
 
-// Create a tailored rewrite and bullet suggestions (truthful; add [VERIFY] if numbers unknown)
 export async function generateRewrite(resume, jd, jdInfo, scoring, mode = 'conservative') {
   await ensureGenerator();
 
@@ -107,15 +105,19 @@ Now output the rewritten resume text only:`;
   });
   const rewritten = (out[0]?.generated_text || '').trim();
 
-  // Suggestions targeted at missing items
+  // targeted suggestions for gaps
   const suggPrompt = `Create 5 concise bullet suggestions to cover these gaps:
 ${JSON.stringify(scoring.missing.must.concat(scoring.missing.nice).slice(0, 6))}
 Each bullet must be truthful and include outcomes if available; otherwise add [VERIFY].
-Output as a simple list (no numbering, one per line).`;
+Output as a simple list (one per line).`;
 
   const s = await generator(suggPrompt, { max_new_tokens: 180, temperature: 0.3 });
   const raw = (s[0]?.generated_text || '').trim();
-  const suggestions = raw.split(/\n+/).map(x => x.replace(/^[-•\s]+/, '').trim()).filter(Boolean).slice(0, 6);
+  const suggestions = raw
+    .split(/\n+/)
+    .map(x => x.replace(/^[-•\s]+/, '').trim())
+    .filter(Boolean)
+    .slice(0, 6);
 
   return { rewritten, suggestions };
 }
