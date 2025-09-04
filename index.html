@@ -3,13 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ATS Tailor — OpenAI (Netlify)</title>
+  <title>ATS Tailor</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .chip{border:1px solid #e5e7eb;padding:2px 8px;border-radius:9999px;font-size:12px}
     .card{background:#fff;border-radius:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);padding:20px}
     .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono','Courier New', monospace}
-    /* diff styles */
     #diffBox ins { background:#e6ffed; text-decoration:none; }
     #diffBox del { background:#ffeef0; text-decoration:none; }
     #diffBox span { background:transparent; }
@@ -19,7 +18,7 @@
 <body class="bg-gray-50 text-gray-900">
   <div class="max-w-7xl mx-auto p-6 space-y-6">
     <header class="flex items-center justify-between">
-      <h1 class="text-2xl font-bold">Resume Tailor (OpenAI)</h1>
+      <h1 class="text-2xl font-bold">ATS Resume Tailor</h1>
       <span class="text-xs text-gray-600">Private: your key stays on Netlify</span>
     </header>
 
@@ -52,37 +51,20 @@
     <section class="card space-y-3">
       <div class="flex items-center justify-between">
         <h2 class="font-semibold">Tailored Draft</h2>
-        <div class="flex items-center gap-3 text-sm">
-          <label class="flex items-center gap-2">
-            <input type="radio" name="mode" value="conservative" checked> Conservative
-          </label>
-          <label class="flex items-center gap-2">
-            <input type="radio" name="mode" value="aggressive"> Aggressive
-          </label>
-          <button id="rewriteBtn" class="px-3 py-2 rounded-lg border">Rewrite</button>
-        </div>
+        <button id="rewriteBtn" class="px-3 py-2 rounded-lg border">Rewrite</button>
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div>
-          <h3 class="font-medium mb-2">Suggestions</h3>
-          <ul id="suggested" class="list-disc pl-6 text-sm"></ul>
-        </div>
-        <div>
-          <div class="flex items-center justify-between">
-            <h3 class="font-medium mb-2">Updated Resume</h3>
-            <div class="flex items-center gap-3">
-              <div id="rewriteStatus" class="text-sm text-gray-600"></div>
-              <div id="rewriteScoreBox" class="text-sm"></div>
-            </div>
+        <div class="col-span-2">
+          <div class="flex items-center justify-between mb-2">
+            <div id="rewriteStatus" class="text-sm text-gray-600"></div>
+            <div id="rewriteScoreBox" class="text-sm font-medium text-green-700"></div>
           </div>
 
-          <!-- textarea -> div to support bold highlights -->
           <div id="rewritten"
                class="w-full h-80 p-3 border rounded-lg mono whitespace-pre-wrap overflow-auto bg-white"
                contenteditable="false" aria-label="Rewritten resume"></div>
 
-          <!-- diff controls -->
           <div class="mt-4 flex items-center gap-3">
             <button id="showDiffBtn" class="px-3 py-2 rounded-lg border text-sm">Show changes</button>
             <span id="diffHint" class="text-xs text-gray-500"></span>
@@ -103,8 +85,7 @@
   </div>
 
   <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
-  <!-- correct browser build -->
-  <script src="https://unpkg.com/diff-match-patch@1.0.5/diff_match_patch.js"></script>
-  <script type="module" src="./js/main.js?v=5"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/diff_match_patch/20121119/diff_match_patch.min.js"></script>
+  <script type="module" src="./js/main.js?v=10"></script>
 </body>
 </html>

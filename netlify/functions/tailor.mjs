@@ -1,215 +1,95 @@
-// netlify/functions/tailor.mjs — iterative rewrite to maximize ATS score (truthfully)
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4o-mini';
-const TARGET_SCORE = 95;
-const MAX_IMPROVE_PASSES = 2;
-const FETCH_TIMEOUT_MS = 25000;
+const FETCH_TIMEOUT_MS = 10000;
 
 export default async function handler(req) {
-  try {
-    if (req.method !== 'POST') return json({ error: 'Use POST' }, 405);
-    if (!OPENAI_API_KEY) return json({ error: 'Missing OPENAI_API_KEY' }, 500);
+  if (req.method !== 'POST') return json({ error: 'Use POST' }, 405);
 
-    const body = await readJson(req);
-    const { action } = body || {};
-    if (!action) return json({ error: 'Missing action' }, 400);
+  const body = await readJson(req);
+  const { action } = body || {};
+  if (!action) return json({ error: 'Missing action' }, 400);
 
-    if (action === 'analyze') {
-      const { resume = '', jd = '' } = body || {};
-      if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
-      const analysis = await analyzeResume(resume, jd);
-      return json(analysis);
-    }
-
-    if (action === 'rewrite') {
-      const { resume = '', jd = '', mode = 'conservative' } = body || {};
-      if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
-
-      const baseline = await analyzeResume(resume, jd);
-      let { rewritten_resume, suggestions } = await rewriteResume(resume, jd, mode, baseline);
-      if (!rewritten_resume || !rewritten_resume.trim()) rewritten_resume = resume;
-
-      let current = await analyzeResume(rewritten_resume, jd);
-
-      let passes = 0;
-      while (current.match_score < TARGET_SCORE && passes < MAX_IMPROVE_PASSES) {
-        const improved = await improveResume({
-          original: resume,
-          current: rewritten_resume,
-          jd,
-          mode,
-          currentScore: current.match_score,
-          missing_required: current.missing_required,
-          missing_nice: current.missing_nice
-        });
-        if (improved && improved.trim() && improved !== rewritten_resume) {
-          rewritten_resume = improved;
-          current = await analyzeResume(rewritten_resume, jd);
-          passes++;
-        } else {
-          break;
-        }
-      }
-
-      return json({
-        rewritten_resume,
-        suggestions,
-        final_score: current.match_score,
-        final_missing_required: current.missing_required,
-        final_missing_nice: current.missing_nice,
-        passes
-      });
-    }
-
-    return json({ error: 'Unknown action' }, 400);
-  } catch (err) {
-    console.error(err);
-    return json({ error: 'Server error', details: err?.message || String(err) }, 500);
+  if (action === 'analyze') {
+    const { resume = '', jd = '' } = body || {};
+    const result = await analyzeResume(resume, jd);
+    return json(result);
   }
+
+  if (action === 'rewrite') {
+    const { resume = '', jd = '' } = body || {};
+    const rewritten = await rewriteResume(resume, jd);
+    const scored = await analyzeResume(rewritten.rewritten_resume, jd);
+    return json({ ...rewritten, final_score: scored.match_score });
+  }
+
+  return json({ error: 'Unknown action' }, 400);
 }
 
-/* ---------------- analyzers & rewriters ---------------- */
-
 async function analyzeResume(resume, jd) {
-  const system = [
-    'You are an ATS evaluator.',
-    'Score 0–100 how well the resume matches the job description.',
-    'Rubric:',
-    '• 70%: presence of JD keywords/skills phrased naturally (avoid keyword stuffing).',
-    '• 20%: alignment of responsibilities/scope and seniority.',
-    '• 10%: outcomes/metrics.',
-    'Never credit skills clearly absent. If critical must-haves are missing, explain via capped_reason.',
-    'Output json only: { "match_score": number, "missing_required": string[], "missing_nice": string[], "bullet_suggestions": string[], "flags": string[], "capped_reason": string|null }'
-  ].join(' ');
-
+  const sys = 'You are an ATS evaluator. Output json only with: { "match_score": number }';
   const user = JSON.stringify({ resume, jd });
-
   const data = await openAI({
     model: MODEL,
     messages: [
-      { role: 'system', content: system },
+      { role: 'system', content: sys },
       { role: 'user', content: user }
     ],
     temperature: 0.2,
     response_format: { type: 'json_object' }
   });
-
-  return {
-    match_score: clamp(data.match_score, 0, 100, 0),
-    missing_required: arr(data.missing_required),
-    missing_nice: arr(data.missing_nice),
-    bullet_suggestions: arr(data.bullet_suggestions),
-    flags: arr(data.flags),
-    capped_reason: data.capped_reason ?? null
-  };
+  return { match_score: Math.min(100, Math.max(0, Number(data.match_score || 0))) };
 }
 
-async function rewriteResume(resume, jd, mode, baseline) {
-  const intensity = mode === 'aggressive'
-    ? 'Aggressive: restructure sections, compress fluff, front-load JD keywords, quantify results, and remove weak bullets.'
-    : 'Conservative: keep structure, tighten language, add metrics, and naturally weave JD keywords.';
-
-  const system = [
-    'You are an expert resume tailor focused on maximizing ATS match without fabricating.',
-    'Rules:',
-    '1) Do NOT invent employers, titles, or projects.',
-    '2) You MAY rephrase to emphasize measurable outcomes.',
-    '3) You MAY add a Skills section and reorder content.',
-    '4) Include JD-relevant keywords ONLY if plausibly supported by the original resume.',
-    'Output json: { "rewritten_resume": string, "suggestions": string[] }.'
-  ].join(' ');
-
-  const user = JSON.stringify({
-    mode,
-    intensity,
-    jd,
-    baseline_gaps: {
-      missing_required: baseline.missing_required,
-      missing_nice: baseline.missing_nice
-    },
-    instructions: [
-      'Address baseline gaps when truthful.',
-      'Prefer bullets that include action + impact + metric.',
-      'Keep concise, senior tone.'
-    ],
-    resume
-  });
-
+async function rewriteResume(resume, jd) {
+  const sys = `You are an expert resume tailor.
+- Rewrite the resume aggressively to maximize ATS match with the job description.
+- Target a 100% match but DO NOT invent false experience.
+- Preserve the tone and style of the original resume.
+- Fix typos and grammar, but keep user's voice.
+- Keep resume concise, prioritize keeping under 2 US letter pages (~1100-1200 words).
+- Output json only: { "rewritten_resume": string }`;
+  const user = JSON.stringify({ resume, jd });
   const data = await openAI({
     model: MODEL,
     messages: [
-      { role: 'system', content: system },
+      { role: 'system', content: sys },
       { role: 'user', content: user }
     ],
-    temperature: mode === 'aggressive' ? 0.6 : 0.4,
+    temperature: 0.5,
     response_format: { type: 'json_object' },
     max_tokens: 2000
   });
-
-  return {
-    rewritten_resume: str(data.rewritten_resume),
-    suggestions: arr(data.suggestions)
-  };
+  return { rewritten_resume: data.rewritten_resume || resume };
 }
-
-async function improveResume({ original, current, jd, mode, currentScore, missing_required, missing_nice }) {
-  const system = [
-    'You are refining a resume to raise ATS score further WITHOUT fabricating.',
-    'Prefer minimal edits with maximum keyword/role alignment and metrics.',
-    'If required skills are missing and not in the original, do NOT add them.',
-    'Return json with the single key "rewritten_resume".'
-  ].join(' ');
-
-  const user = JSON.stringify({
-    currentScore,
-    missing_required,
-    missing_nice,
-    jd_terms_hint: 'Cover JD terminology naturally (no stuffing). Add/adjust Skills & Tools section if truthful.',
-    mode,
-    original_resume: original,
-    current_resume: current,
-    jd
-  });
-
-  const data = await openAI({
-    model: MODEL,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user }
-    ],
-    temperature: 0.4,
-    response_format: { type: 'json_object' }
-  });
-
-  return str(data.rewritten_resume) || '';
-}
-
-/* ---------------- low-level helpers ---------------- */
 
 async function openAI(payload) {
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort('timeout'), FETCH_TIMEOUT_MS);
-
-  const res = await fetch(OPENAI_URL, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: controller.signal
-  }).finally(() => clearTimeout(t));
-
-  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${await res.text().catch(() => '')}`);
-
-  const json = await res.json();
-  const content = json?.choices?.[0]?.message?.content?.trim() || '{}';
-  try { return JSON.parse(content); } catch { return salvageJson(content); }
+  const t = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(OPENAI_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const json = await res.json();
+    return JSON.parse(json?.choices?.[0]?.message?.content || '{}');
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 function json(body, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' }
+  });
 }
-async function readJson(req) { const t = await req.text(); try { return JSON.parse(t || '{}'); } catch { return {}; } }
-function arr(x) { return Array.isArray(x) ? x : []; }
-function str(s) { return typeof s === 'string' ? s : ''; }
-function clamp(n, min, max, fb = 0) { const v = Number(n); return Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fb; }
-function salvageJson(s) { const a = s.indexOf('{'); const b = s.lastIndexOf('}'); if (a >= 0 && b > a) { try { return JSON.parse(s.slice(a, b + 1)); } catch {} } return {}; }
+async function readJson(req) {
+  try { return JSON.parse(await req.text()); } catch { return {}; }
+}
