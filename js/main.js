@@ -23,7 +23,7 @@ const el = {
 let lastOriginal = '';
 let lastRewritten = '';
 const TARGET = 95;
-const MAX_PASSES = 6;
+const MAX_PASSES = 3;
 
 window._ats = { lastOriginal: '', lastRewritten: '' };
 
@@ -61,7 +61,7 @@ el.analyzeBtn.addEventListener('click', async () => {
   }
 });
 
-/* ---------- Rewrite: loop client-side to hit ≥95 ---------- */
+/* ---------- Rewrite: loop client-side to hit ≥95 (max 3 passes) ---------- */
 el.rewriteBtn.addEventListener('click', async () => {
   const jd = el.jdText.value.trim();
   let current = el.resumeText.value.trim();
@@ -76,22 +76,17 @@ el.rewriteBtn.addEventListener('click', async () => {
   hideDiff();
 
   setRewriteStatus('Rewriting…');
-  let bestScore = 0;
+  let score = 0;
   let i = 0;
 
   try {
     for (i = 1; i <= MAX_PASSES; i++) {
       setRewriteStatus(`Pass ${i}/${MAX_PASSES}…`);
+      const data = await callFn('rewrite', { resume: current, jd });
+      current = String(data?.rewritten_resume || current);
+      score = Math.round(Number(data?.final_score ?? 0));
 
-      // Single, fast server pass
-      const data = await callFn('rewrite_pass', { resume: current, jd });
-      const next = String(data?.rewritten_resume || current);
-      const score = Math.round(Number(data?.match_score ?? 0));
-
-      // update current and UI preview each pass (bold additions)
-      current = next;
-      bestScore = score;
-
+      // show incremental bold adds
       try {
         const html = renderInlineBoldAdds(lastOriginal, current);
         el.rewritten.innerHTML = html && html.trim() ? html : escapeHtml(current);
@@ -121,7 +116,7 @@ el.showDiffBtn.addEventListener('click', () => {
 
   if (el.diffBox.classList.contains('hidden')) {
     try {
-      const html = renderDiffHtml(base, revised); // <ins> green, <del> red
+      const html = renderDiffHtml(base, revised);
       el.diffBox.innerHTML = html && html.trim() ? html : escapeHtml(revised);
     } catch (e) {
       console.warn('diff render failed; showing plain text', e);
@@ -184,7 +179,7 @@ function renderInlineBoldAdds(original, rewritten) {
   dmp.diff_cleanupSemantic(diffs);
   let out = '';
   for (const [op, text] of diffs) {
-    if (op === 1) out += '<strong>' + escapeHtml(text) + '</strong>'; // additions bold
+    if (op === 1) out += '<strong>' + escapeHtml(text) + '</strong>';
     else if (op === 0) out += escapeHtml(text);
   }
   return out || escapeHtml(String(rewritten ?? ''));
@@ -196,8 +191,8 @@ function renderDiffHtml(original, rewritten) {
   dmp.diff_cleanupSemantic(diffs);
   let out = '';
   for (const [op, text] of diffs) {
-    if (op === -1) out += '<del>' + escapeHtml(text) + '</del>';   // red via CSS
-    else if (op === 1) out += '<ins>' + escapeHtml(text) + '</ins>'; // green via CSS
+    if (op === -1) out += '<del>' + escapeHtml(text) + '</del>';
+    else if (op === 1) out += '<ins>' + escapeHtml(text) + '</ins>';
     else out += '<span>' + escapeHtml(text) + '</span>';
   }
   return out || escapeHtml(String(rewritten ?? ''));
