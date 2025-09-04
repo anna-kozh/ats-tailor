@@ -2,8 +2,14 @@
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4o-mini';
-const FETCH_TIMEOUT_MS = 20000; // 20s; single call per action to avoid timeouts
 
+// Keep things fast + stable
+const FETCH_TIMEOUT_MS = 20000;   // 20s total request budget
+const MAX_TOKENS_REWRITE = 1800;  // fits ≤2 pages comfortably
+
+/** ==============================
+ *  HTTP entry
+ *  ============================== */
 export default async function handler(req) {
   if (req.method !== 'POST') return json({ error: 'Use POST' }, 405);
   if (!OPENAI_API_KEY) return json({ error: 'Missing OPENAI_API_KEY' }, 500);
@@ -15,30 +21,43 @@ export default async function handler(req) {
   if (action === 'analyze') {
     const { resume = '', jd = '' } = body || {};
     if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
-    const analysis = await analyzeResume(resume, jd);
-    return json(analysis);
+
+    const score = await scorePair(resume, jd);        // <-- canonical scorer
+    return json({ match_score: score });
   }
 
   if (action === 'rewrite') {
     const { resume = '', jd = '' } = body || {};
     if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
-    const result = await rewriteAndScore(resume, jd);
-    // Fallback to original resume if model failed
-    if (!result.rewritten_resume || !String(result.rewritten_resume).trim()) {
-      result.rewritten_resume = resume;
-    }
-    return json({ rewritten_resume: result.rewritten_resume, final_score: clamp(Number(result.match_score),0,100,0) });
+
+    // 1) Aggressive, truthful rewrite (single pass; fast)
+    const rewritten = await rewritePass(resume, jd);
+
+    // 2) Canonical score (same as /analyze)
+    const score = await scorePair(rewritten, jd);
+
+    return json({
+      rewritten_resume: rewritten || resume,
+      final_score: score
+    });
   }
 
   return json({ error: 'Unknown action' }, 400);
 }
 
-/** Analyze only */
-async function analyzeResume(resume, jd) {
+/** ==============================
+ *  Canonical scorer (used by BOTH analyze & rewrite flows)
+ *  Temp = 0 for consistency
+ *  ============================== */
+async function scorePair(resume, jd) {
   const system = [
-    'You are an ATS evaluator.',
-    'Return json only with: { "match_score": number }.',
-    'Score strictly from 0-100 based on JD alignment; do not reward absent skills.'
+    'You are an ATS evaluator. Output *json only* with this exact shape:',
+    '{ "match_score": number }',
+    'Scoring rules:',
+    '- 0–100 scale.',
+    '- Prioritize explicit presence of JD must-haves and exact phrases.',
+    '- Reward phrasing alignment and measurable impact.',
+    '- Do not infer skills that are not stated.'
   ].join(' ');
   const user = JSON.stringify({ resume, jd });
 
@@ -48,21 +67,31 @@ async function analyzeResume(resume, jd) {
       { role: 'system', content: system },
       { role: 'user', content: user }
     ],
-    temperature: 0.1,
+    // Deterministic
+    temperature: 0,
+    top_p: 1,
     response_format: { type: 'json_object' }
   });
 
-  return { match_score: clamp(Number(data.match_score), 0, 100, 0) };
+  return clamp(Number(data?.match_score), 0, 100, 0);
 }
 
-/** Rewrite aggressively and self-score in one call to reduce timeouts */
-async function rewriteAndScore(resume, jd) {
+/** ==============================
+ *  Single-pass aggressive rewrite
+ *  Targets ≥95 while staying truthful
+ *  ============================== */
+async function rewritePass(resume, jd) {
   const system = [
     'You are an expert resume tailor.',
-    'Goal: aggressively rewrite the resume to maximize ATS match to the JD.',
-    'Rules: no fabrication; preserve original tone; fix grammar/typos; concise; prioritize <= 2 US Letter pages (~1100-1200 words).',
-    'Return json only with: { "rewritten_resume": string, "match_score": number }.',
-    'Compute match_score (0-100) for the rewritten resume vs the JD.'
+    'Goal: rewrite AGGRESSIVELY to maximize ATS alignment with the JD and reach a match score of 95–100.',
+    'Rules (must follow):',
+    '- No fabrication. Only include skills/impact that are truthful for the candidate.',
+    '- Preserve original tone & voice.',
+    '- Fix grammar/typos; keep professional and concise.',
+    '- Prioritize inclusion of JD *must-have* keywords and exact phrases where truthful.',
+    '- Prefer bullet points with measurable impact.',
+    '- Keep within ~1100–1200 words (≤2 US Letter pages).',
+    'Return *json only* with this shape: { "rewritten_resume": string }.'
   ].join(' ');
 
   const user = JSON.stringify({ resume, jd });
@@ -73,18 +102,18 @@ async function rewriteAndScore(resume, jd) {
       { role: 'system', content: system },
       { role: 'user', content: user }
     ],
-    temperature: 0.5,
+    temperature: 0.4,          // a touch of creativity
+    top_p: 1,
     response_format: { type: 'json_object' },
-    max_tokens: 1800
+    max_tokens: MAX_TOKENS_REWRITE
   });
 
-  return {
-    rewritten_resume: typeof data.rewritten_resume === 'string' ? data.rewritten_resume : '',
-    match_score: clamp(Number(data.match_score), 0, 100, 0)
-  };
+  return String(data?.rewritten_resume || '').trim();
 }
 
-/** OpenAI helper with timeout */
+/** ==============================
+ *  OpenAI helper w/ timeout
+ *  ============================== */
 async function openAI(payload) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(new Error('timeout')), FETCH_TIMEOUT_MS);
@@ -99,22 +128,30 @@ async function openAI(payload) {
       signal: controller.signal
     });
     if (!res.ok) {
-      throw new Error(`OpenAI ${res.status}: ${await res.text().catch(()=>'')}`);
+      const text = await res.text().catch(() => '');
+      throw new Error(`OpenAI ${res.status}: ${text}`);
     }
     const json = await res.json();
     const content = json?.choices?.[0]?.message?.content?.trim() || '{}';
-    return JSON.parse(content);
-  } catch (err) {
-    // Surface clean error message
-    throw new Error(err?.message || String(err));
+    try { return JSON.parse(content); } catch { return {}; }
   } finally {
     clearTimeout(t);
   }
 }
 
-/** utils */
-function json(body, status=200){
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+/** ==============================
+ *  utils
+ *  ============================== */
+function json(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' }
+  });
 }
-async function readJson(req){ const t = await req.text(); try{ return JSON.parse(t||'{}'); } catch { return {}; } }
-function clamp(n, min, max, fb=0){ const v = Number(n); return Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fb; }
+async function readJson(req) {
+  try { return JSON.parse(await req.text()); } catch { return {}; }
+}
+function clamp(n, min, max, fb = 0) {
+  const v = Number(n);
+  return Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fb;
+}

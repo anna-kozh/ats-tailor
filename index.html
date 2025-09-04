@@ -4,10 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ATS Tailor</title>
-  <!-- Tailwind CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- Diff highlights -->
+  <!-- Diff highlights + basics -->
   <style>
     .card{background:#fff;border-radius:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);padding:20px}
     .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace}
@@ -28,7 +27,7 @@
       <!-- Resume -->
       <div class="card space-y-3">
         <h2 class="font-semibold">Resume</h2>
-        <input id="resumeFile" type="file" accept=".docx,.txt" class="block w-full text-sm">
+        <input id="resumeFile" type="file" accept=".docx,.txt" class="block w-full text-sm" />
         <textarea id="resumeText" class="w-full h-64 p-3 border rounded-lg" placeholder="Paste resume text"></textarea>
         <p class="text-xs text-gray-500">Tip: .docx parses best.</p>
       </div>
@@ -36,7 +35,7 @@
       <!-- JD -->
       <div class="card space-y-3">
         <h2 class="font-semibold">Job Description</h2>
-        <input id="jdFile" type="file" accept=".docx,.txt" class="block w-full text-sm">
+        <input id="jdFile" type="file" accept=".docx,.txt" class="block w-full text-sm" />
         <textarea id="jdText" class="w-full h-64 p-3 border rounded-lg" placeholder="Paste the JD here"></textarea>
       </div>
 
@@ -95,6 +94,6 @@
           crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
   <!-- App -->
-  <script type="module" src="./js/main.js?v=13"></script>
+  <script type="module" src="./js/main.js?v=14"></script>
 </body>
 </html>

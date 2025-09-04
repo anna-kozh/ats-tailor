@@ -96,8 +96,8 @@ el.rewriteBtn.addEventListener('click', async () => {
       renderCompactScore(el.rewriteScoreBox, scored || { match_score: 0 });
     }
 
-    // Update textarea so next pass uses rewritten
-    el.resumeText.value = lastRewritten;
+    // IMPORTANT: keep original textarea unchanged (do NOT overwrite)
+    // el.resumeText.value = lastRewritten;
 
     setRewriteStatus('Done.');
     if (el.diffHint) el.diffHint.textContent = 'Green = added, red = removed. Toggle to view.';
