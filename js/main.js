@@ -59,13 +59,13 @@ el.analyzeBtn.addEventListener('click', async () => {
   }
 });
 
-/* --------- Rewrite --------- */
+/* --------- Rewrite (loops server-side to ≥95) --------- */
 el.rewriteBtn.addEventListener('click', async () => {
   const resume = el.resumeText.value.trim();
   const jd = el.jdText.value.trim();
   if (!resume || !jd) return setRewriteStatus('Add both resume + JD.');
 
-  // capture original immediately so diff has a baseline even if request fails
+  // baseline for diff
   lastOriginal = String(resume || '');
   lastRewritten = '';
   window._ats = { lastOriginal, lastRewritten };
@@ -74,7 +74,7 @@ el.rewriteBtn.addEventListener('click', async () => {
   el.rewriteScoreBox.innerHTML = '';
   hideDiff();
 
-  setRewriteStatus('Rewriting…');
+  setRewriteStatus('Rewriting to ≥95…');
   try {
     const data = await callFn('rewrite', { resume, jd });
 
@@ -82,7 +82,7 @@ el.rewriteBtn.addEventListener('click', async () => {
     lastRewritten = (serverText && serverText.trim()) ? serverText : lastOriginal;
     window._ats = { lastOriginal, lastRewritten };
 
-    // render inline bold adds; safe fallback
+    // Render with inline bold for additions
     try {
       const html = renderInlineBoldAdds(lastOriginal, lastRewritten);
       el.rewritten.innerHTML = html && html.trim() ? html : escapeHtml(lastRewritten);
@@ -91,7 +91,7 @@ el.rewriteBtn.addEventListener('click', async () => {
       el.rewritten.textContent = lastRewritten;
     }
 
-    // prefer server score; otherwise rescore
+    // Score box (server already looped)
     const serverScore = Number.isFinite(Number(data?.final_score)) ? Number(data.final_score) : null;
     if (serverScore !== null) {
       renderCompactScore(el.rewriteScoreBox, { match_score: serverScore });
@@ -100,10 +100,10 @@ el.rewriteBtn.addEventListener('click', async () => {
       renderCompactScore(el.rewriteScoreBox, scored || { match_score: 0 });
     }
 
-    // DO NOT overwrite original textarea
-    // el.resumeText.value = lastRewritten;
-
-    setRewriteStatus('Done.');
+    // Status w/ pass count
+    const iters = Number(data?.iterations) || 1;
+    const target = Number(data?.target) || 95;
+    setRewriteStatus(`Done in ${iters} pass${iters === 1 ? '' : 'es'} (target ${target}).`);
     if (el.diffHint) el.diffHint.textContent = 'Green = added, red = removed. Toggle to view.';
   } catch (err) {
     console.error(err);
@@ -119,7 +119,7 @@ el.showDiffBtn.addEventListener('click', () => {
 
   if (el.diffBox.classList.contains('hidden')) {
     try {
-      const html = renderDiffHtml(base, revised);
+      const html = renderDiffHtml(base, revised); // uses <del> (red) and <ins> (green)
       el.diffBox.innerHTML = html && html.trim() ? html : escapeHtml(revised);
     } catch (e) {
       console.warn('diff render failed; showing plain text', e);
@@ -174,7 +174,7 @@ function setRewriteStatus(m) { el.rewriteStatus.textContent = m || ''; }
 function stripHtml(s) { const d = document.createElement('div'); d.innerHTML = s || ''; return d.innerText; }
 function escapeHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-/* --------- Diff utilities (robust) --------- */
+/* --------- Diff utilities --------- */
 function ensureDmp() {
   return (typeof diff_match_patch === 'function') ? new diff_match_patch() : null;
 }
@@ -189,8 +189,8 @@ function renderInlineBoldAdds(original, rewritten) {
     const item = diffs[i];
     const op = Array.isArray(item) ? item[0] : (item?.operation ?? item?.op ?? 0);
     const text = Array.isArray(item) ? item[1] : (item?.text ?? '');
-    if (op === 1) out += '<strong>' + escapeHtml(text) + '</strong>';
-    else if (op === 0) out += escapeHtml(text);
+    if (op === 1) out += '<strong>' + escapeHtml(text) + '</strong>';     // additions bold
+    else if (op === 0) out += escapeHtml(text);                             // unchanged
   }
   return out || escapeHtml(String(rewritten ?? ''));
 }
@@ -205,8 +205,8 @@ function renderDiffHtml(original, rewritten) {
     const item = diffs[i];
     const op = Array.isArray(item) ? item[0] : (item?.operation ?? item?.op ?? 0);
     const text = Array.isArray(item) ? item[1] : (item?.text ?? '');
-    if (op === -1) out += '<del>' + escapeHtml(text) + '</del>';
-    else if (op === 1) out += '<ins>' + escapeHtml(text) + '</ins>';
+    if (op === -1) out += '<del>' + escapeHtml(text) + '</del>';            // red background via CSS
+    else if (op === 1) out += '<ins>' + escapeHtml(text) + '</ins>';        // green background via CSS
     else out += '<span>' + escapeHtml(text) + '</span>';
   }
   return out || escapeHtml(String(rewritten ?? ''));

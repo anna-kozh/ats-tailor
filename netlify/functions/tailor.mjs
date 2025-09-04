@@ -6,6 +6,10 @@ const MODEL = 'gpt-4o-mini';
 const FETCH_TIMEOUT_MS = 25000;
 const MAX_TOKENS_REWRITE = 1400;
 
+// new: target + safety caps
+const TARGET_SCORE = 95;
+const MAX_PASSES = 6;
+
 export default async function handler(req) {
   if (req.method !== 'POST') return json({ error: 'Use POST' }, 405);
   if (!OPENAI_API_KEY) return json({ error: 'Missing OPENAI_API_KEY' }, 500);
@@ -24,14 +28,21 @@ export default async function handler(req) {
   if (action === 'rewrite') {
     const { resume = '', jd = '' } = body || {};
     if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
-    const rewritten = await rewritePass(resume, jd);
-    const score = await scorePair(rewritten || resume, jd);
-    return json({ rewritten_resume: rewritten || resume, final_score: score });
+
+    // new: iterate until target
+    const { text, score, iterations } = await rewriteToTarget(resume, jd, TARGET_SCORE, MAX_PASSES);
+    return json({
+      rewritten_resume: text || resume,
+      final_score: Number.isFinite(score) ? score : 0,
+      iterations,
+      target: TARGET_SCORE
+    });
   }
 
   return json({ error: 'Unknown action' }, 400);
 }
 
+/** Score 0–100 */
 async function scorePair(resume, jd) {
   const system = [
     'You are an ATS evaluator. Output json only: { "match_score": number }.',
@@ -53,11 +64,39 @@ async function scorePair(resume, jd) {
   return clamp(Number(data?.match_score), 0, 100, 0);
 }
 
-async function rewritePass(resume, jd) {
+/** Find missing JD keywords relative to the resume */
+async function findGaps(resume, jd) {
+  const system = [
+    'You extract ATS-relevant keywords that are present in the JD but absent or weak in the resume.',
+    'Return json only: { "missing_keywords": string[] }.',
+    'Include exact phrases and skills from the JD. Max 30 items. No soft fluff.'
+  ].join(' ');
+  const user = JSON.stringify({ resume, jd });
+
+  const data = await openAI({
+    model: MODEL,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user }
+    ],
+    temperature: 0,
+    top_p: 1,
+    response_format: { type: 'json_object' }
+  });
+
+  const arr = Array.isArray(data?.missing_keywords) ? data.missing_keywords : [];
+  return arr.map(x => String(x).trim()).filter(Boolean).slice(0, 30);
+}
+
+/** Single rewrite pass, optionally guided by gaps */
+async function rewritePass(resume, jd, gaps = []) {
   const system = [
     'You are an expert resume tailor. Rewrite aggressively for ≥95 alignment without fabrication.',
-    'Preserve tone, fix grammar/typos, keep concise (≤2 US Letter pages ~1100–1200 words).',
+    'Preserve tone, fix grammar, keep concise (≤2 US Letter pages ~1100–1200 words).',
     'Prioritize explicit JD must-have keywords and measurable impact.',
+    gaps.length
+      ? `If TRUE for the candidate, naturally weave in these JD terms: ${gaps.join(', ')}. Do NOT invent experience.`
+      : 'Use only information that could reasonably be inferred from the original wording; do not invent experience.',
     'Return json only: { "rewritten_resume": string }.'
   ].join(' ');
 
@@ -78,6 +117,31 @@ async function rewritePass(resume, jd) {
   return String(data?.rewritten_resume || '').trim();
 }
 
+/** Loop until target score or passes exhausted */
+async function rewriteToTarget(resume, jd, target = 95, maxPasses = 6) {
+  let attempt = String(resume || '');
+  let bestText = attempt;
+  let bestScore = await scorePair(bestText, jd);
+  let i = 0;
+
+  for (; i < maxPasses && bestScore < target; i++) {
+    const gaps = await findGaps(bestText, jd);
+    const next = await rewritePass(bestText, jd, gaps);
+    const nextScore = await scorePair(next || bestText, jd);
+
+    if (Number(nextScore) >= Number(bestScore)) {
+      bestText = next || bestText;
+      bestScore = nextScore;
+    } else {
+      // if it regresses, still continue once more with fresh gaps
+      bestText = next || bestText;
+      bestScore = nextScore;
+    }
+  }
+  return { text: bestText, score: bestScore, iterations: Math.max(1, i) };
+}
+
+/** OpenAI helper */
 async function openAI(payload) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(new Error('timeout')), FETCH_TIMEOUT_MS);
