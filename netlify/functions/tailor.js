@@ -3,7 +3,6 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4o-mini';
 
-// keep well below Netlify limits
 const FETCH_TIMEOUT_MS = 8500;
 const MAX_TOKENS_REWRITE = 1400;
 
@@ -22,7 +21,7 @@ export default async function handler(req) {
     return json({ match_score: score });
   }
 
-  // single-pass rewrite, client loops up to 3 passes
+  // single-pass rewrite; client can loop up to 3 passes
   if (action === 'rewrite') {
     const { resume = '', jd = '' } = body || {};
     if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
@@ -39,7 +38,9 @@ export default async function handler(req) {
 async function scorePair(resume, jd) {
   const system = [
     'You are an ATS evaluator. Return JSON only: { "match_score": number }.',
-    '0-100 scale; reward explicit JD must-haves/exact phrases; no hallucination.'
+    'Score 0-100. Heavily weight exact JD phrase overlap (skills, tools, domains, certifications).',
+    'Reward a visible "Skills & Tools Match" section using JD phrases when truthful.',
+    'Penalize fluff or claims not present in the text. Do not infer unstated skills.'
   ].join(' ');
   const user = JSON.stringify({ resume, jd });
   const data = await openAI({
@@ -58,7 +59,8 @@ async function scorePair(resume, jd) {
 async function findGaps(resume, jd) {
   const system = [
     'Extract concrete JD keywords/phrases absent or weak in the resume.',
-    'Return JSON only: { "missing_keywords": string[] }. Max 30.'
+    'Return JSON only: { "missing_keywords": string[] }. Max 30.',
+    'Focus on hard skills, tools, frameworks, domains, and exact phrases.'
   ].join(' ');
   const user = JSON.stringify({ resume, jd });
   const data = await openAI({
@@ -77,10 +79,13 @@ async function findGaps(resume, jd) {
 
 async function rewritePass(resume, jd, gaps = []) {
   const system = [
-    'Expert resume tailor for ATS. Rewrite to align strongly without fabrication.',
-    'Keep concise, measurable impact, prioritize JD must-haves and exact phrases.',
-    gaps.length ? `Weave in these JD terms when plausible: ${gaps.join(', ')}.`
-               : 'Use only what is reasonably inferable from the original.',
+    'You are an expert ATS resume tailor. Goal: maximize truthful keyword/phrase overlap with the JD.',
+    'Rewrite into a concise, metric-heavy resume (≤1200 words).',
+    'Insert a short top section titled "Skills & Tools Match" that lists exact JD keywords you can truthfully claim.',
+    'Use exact JD phrasing naturally in bullets and headings; no obvious keyword stuffing.',
+    'Prefer active verbs and quant results; keep employers and dates intact.',
+    gaps.length ? `Prioritize weaving these JD terms (only if truthful): ${gaps.join(', ')}.`
+                : 'Use only what can be reasonably inferred from the original. Do not invent experience.',
     'Return JSON only: { "rewritten_resume": string }.'
   ].join(' ');
   const user = JSON.stringify({ resume, jd });
