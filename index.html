@@ -1,81 +1,108 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>ATS Tailor — v1→v2→v3</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ATS Tailor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    :root { --bg:#fafafa; --card:#fff; --muted:#6b7280; --accent:#111827; --chip:#f3f4f6; --chip-border:#e5e7eb; --green:#10b981; }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial; background: var(--bg); color:#111; }
-    .wrap { max-width: 1100px; margin: 36px auto; padding: 0 16px; }
-    h1 { font-size: 22px; margin: 0 0 16px 0; color: var(--accent); }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .card { background: var(--card); border:1px solid #e5e7eb; border-radius: 12px; padding: 12px; }
-    .label { font-size: 14px; color: var(--muted); margin-bottom: 8px; display:flex; justify-content:space-between; align-items:center; }
-    textarea { width:100%; min-height: 220px; resize: vertical; padding: 10px; border:1px solid #e5e7eb; border-radius: 8px; font: 14px/1.5 ui-sans-serif, system-ui, -apple-system; background: #fff; }
-    .row { display:flex; gap:12px; align-items:center; margin-top: 12px; }
-    .btn { border:1px solid #d1d5db; background:#f9fafb; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:600; }
-    .btn:hover { background:#f3f4f6; }
-    .score { font-weight:700; color: var(--green); }
-    .preview { white-space: pre-wrap; font: 14px/1.5 ui-sans-serif, system-ui, -apple-system; }
-    .section-title { font-size:16px; font-weight:700; margin: 10px 0; }
-    .chips { display:flex; flex-wrap: wrap; gap:8px; }
-    .chip { display:inline-flex; gap:6px; align-items:center; padding:6px 10px; background: var(--chip); border:1px solid var(--chip-border); border-radius: 999px; font-size: 12px; }
-    .chip .x { cursor:pointer; font-weight:700; opacity:.6; }
-    .chip .x:hover { opacity:1; }
-    .actions { display:flex; gap:12px; margin-top:10px; }
-    .muted { color: var(--muted); }
-    .divider { height:1px; background:#e5e7eb; margin:16px 0; }
+    .card{background:#fff;border-radius:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);padding:20px}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono','Courier New', monospace}
+    #diffBox ins { background:#e6ffed; text-decoration:none; }
+    #diffBox del { background:#ffeef0; text-decoration:none; }
+    #diffBox span { background:transparent; }
+    .kw-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:#fff4e5; border:1px solid #f2c97d; margin:4px; font-size:12px; }
+    .kw-chip button { font-size:12px; line-height:12px; }
+    .kw-inline { background:linear-gradient(to top, #fff4e5 60%, transparent 60%); }
   </style>
 </head>
-<body>
-  <div class="wrap">
-    <h1>ATS Tailor</h1>
+<body class="bg-gray-50 text-gray-900">
+  <div class="max-w-7xl mx-auto p-6 space-y-6">
+    <header class="flex items-center justify-between">
+      <h1 class="text-2xl font-bold">ATS Resume Tailor</h1>
+      <span class="text-xs text-gray-600">Private: your key stays on Netlify</span>
+    </header>
 
     <!-- Step 1: Inputs -->
-    <div class="grid">
-      <div class="card">
-        <div class="label"><span>Insert Resume (v1)</span><span id="scoreV1" class="score"></span></div>
-        <textarea id="resumeV1" placeholder="Paste your resume text…"></textarea>
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div class="card space-y-3">
+        <h2 class="font-semibold">Resume v1</h2>
+        <input id="resumeFile" type="file" accept=".docx,.txt" class="block w-full text-sm">
+        <textarea id="resumeText" class="w-full h-64 p-3 border rounded-lg" placeholder="Paste resume text"></textarea>
+        <p class="text-xs text-gray-500">Tip: .docx parses best.</p>
       </div>
-      <div class="card">
-        <div class="label"><span>Upload Job Description</span></div>
-        <textarea id="jdText" placeholder="Paste the job description…"></textarea>
+
+      <div class="card space-y-3">
+        <h2 class="font-semibold">Job Description</h2>
+        <input id="jdFile" type="file" accept=".docx,.txt" class="block w-full text-sm">
+        <textarea id="jdText" class="w-full h-64 p-3 border rounded-lg" placeholder="Paste the JD here"></textarea>
       </div>
-    </div>
-    <div class="row">
-      <button id="rewriteBtn" class="btn">Rewrite</button>
-      <button id="analyzeBtn" class="btn">Analyse</button>
-      <span id="status" class="muted"></span>
-    </div>
 
-    <div class="divider"></div>
-
-    <!-- Step 3: v2 output + suggestions -->
-    <div id="v2Card" class="card" style="display:none;">
-      <div class="label"><span>Rewritten Resume (v2)</span><span id="scoreV2" class="score"></span></div>
-      <div id="resumeV2" class="preview"></div>
-
-      <div id="suggestionBlock" style="margin-top:12px; display:none;">
-        <div class="section-title" id="suggestionTitle"></div>
-        <div id="chips" class="chips"></div>
-        <div class="actions">
-          <button id="approveBtn" class="btn">Approve new keywords</button>
-          <button id="clearBtn" class="btn">Clear</button>
+      <div class="card space-y-4">
+        <h2 class="font-semibold">Step 2 — Analyse</h2>
+        <div class="flex items-center gap-3">
+          <button id="analyzeBtn" class="px-3 py-2 rounded-lg bg-black text-white text-sm">Analyse</button>
+          <div id="status" class="text-sm text-gray-600"></div>
         </div>
+        <div id="scoreBox" class="text-sm"></div>
       </div>
-    </div>
+    </section>
 
-    <div class="divider"></div>
+    <!-- Step 3: Rewrite to v2 -->
+    <section class="card space-y-3">
+      <div class="flex items-center justify-between">
+        <h2 class="font-semibold">Step 3 — Rewrite to v2</h2>
+        <button id="rewriteBtn" class="px-3 py-2 rounded-lg border">Rewrite</button>
+      </div>
 
-    <!-- Step 4: v3 output -->
-    <div id="v3Card" class="card" style="display:none;">
-      <div class="label"><span>Final Resume (v3)</span><span id="scoreV3" class="score"></span></div>
-      <div id="resumeV3" class="preview"></div>
-    </div>
+      <div class="flex items-center justify-between mb-2">
+        <div id="rewriteStatus" class="text-sm text-gray-600"></div>
+        <div id="rewriteScoreBox" class="text-sm font-medium text-green-700"></div>
+      </div>
+
+      <div id="rewritten"
+           class="w-full h-72 p-3 border rounded-lg mono whitespace-pre-wrap overflow-auto bg-white"
+           contenteditable="false" aria-label="Rewritten resume v2"></div>
+
+      <div class="mt-2">
+        <h3 class="font-semibold text-sm">If you add these skills, you get to <span id="targetPct">95–97%</span></h3>
+        <div id="chips" class="mt-1"></div>
+        <button id="approveBtn" class="mt-2 px-3 py-2 rounded-lg bg-black text-white text-sm">Approve</button>
+      </div>
+
+      <div class="mt-4 flex items-center gap-3">
+        <button id="showDiffBtn" class="px-3 py-2 rounded-lg border text-sm">Show changes</button>
+        <span id="diffHint" class="text-xs text-gray-500">Green = added, red = removed.</span>
+      </div>
+      <div id="diffBox" class="mt-3 p-3 border rounded-lg mono whitespace-pre-wrap text-sm hidden"></div>
+    </section>
+
+    <!-- Step 4: Final v3 -->
+    <section class="card space-y-3">
+      <div class="flex items-center justify-between">
+        <h2 class="font-semibold">Step 4 — Final v3</h2>
+        <div id="finalScoreBox" class="text-sm font-medium text-green-700"></div>
+      </div>
+      <div id="finalStatus" class="text-sm text-gray-600"></div>
+      <div id="final"
+           class="w-full h-72 p-3 border rounded-lg mono whitespace-pre-wrap overflow-auto bg-white"
+           contenteditable="false" aria-label="Final resume v3"></div>
+      <div class="mt-2">
+        <h3 class="font-semibold text-sm">Still under 95%? Consider adding:</h3>
+        <div id="chipsFinal" class="mt-1"></div>
+      </div>
+      <div class="mt-3 flex gap-3">
+        <button id="copyBtn" class="px-3 py-2 rounded-lg border text-sm">Copy v3</button>
+        <button id="downloadBtn" class="px-3 py-2 rounded-lg border text-sm">Download v3 .txt</button>
+      </div>
+    </section>
+
+    <footer class="text-xs text-gray-500 py-6">
+      Serverless call: <code>/.netlify/functions/tailor</code>. No data stored.
+    </footer>
   </div>
 
-  <script type="module" src="./js/main.js"></script>
+  <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
+  <script type="module" src="./js/main.js?v=30"></script>
 </body>
 </html>

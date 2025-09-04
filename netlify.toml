@@ -1,7 +1,6 @@
 [build]
-  functions = "netlify/functions"
-  publish = "."
+publish = "."
 
 [functions]
-  node_bundler = "esbuild"
-  included_files = []
+directory = "netlify/functions"
+node_bundler = "esbuild"
