@@ -1,3 +1,4 @@
+// js/main.js
 import { readDocxAsText, readTextFile, downloadText } from './utils.js';
 
 const el = {
@@ -47,7 +48,7 @@ el.analyzeBtn.addEventListener('click', async () => {
   const jd = el.jdText.value.trim();
   if (!resume || !jd) return setStatus('Add both resume + JD.');
 
-  // Clear previous score + chips + diff
+  // Reset UI before new analyze
   el.scoreBox.innerHTML = '';
   el.chips.innerHTML = '';
   el.flags.textContent = '';
@@ -55,12 +56,7 @@ el.analyzeBtn.addEventListener('click', async () => {
 
   setStatus('Analyzing…');
   try {
-    const res = await fetch('/.netlify/functions/tailor', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'analyze', resume, jd }),
-    });
-    const data = await res.json();
+    const data = await callFn('analyze', { resume, jd });
     renderAnalysis(data);
     setStatus('Done.');
   } catch (err) {
@@ -77,38 +73,36 @@ el.rewriteBtn.addEventListener('click', async () => {
 
   const mode = document.querySelector('input[name="mode"]:checked')?.value || 'conservative';
 
-  // Clear rewritten box + hide diff
+  // Clear rewritten + signal rescoring will come
   el.rewritten.innerHTML = '';
+  el.scoreBox.innerHTML = ''; // make room for new score
   hideDiff();
 
   setStatus('Rewriting…');
   try {
-    const res = await fetch('/.netlify/functions/tailor', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'rewrite', resume, jd, mode }),
-    });
-    const data = await res.json();
+    const data = await callFn('rewrite', { resume, jd, mode });
 
-    // Suggestions
-    renderSuggestions(data.suggestions || data.bullet_suggestions || []);
+    // Update suggestions from rewrite
+    renderSuggestions(data.suggestions || []);
 
-    // Save originals for diff/highlights
     lastOriginal = resume;
     lastRewritten = data.rewritten_resume || '';
 
-    // Inline: bold new content in the rewritten view
+    // Bold new content inline
     if (lastRewritten) {
       const bolded = renderInlineBoldAdds(lastOriginal, lastRewritten);
       el.rewritten.innerHTML = bolded;
+      // Also update the plain resume textarea so user can iterate further if they want
+      el.resumeText.value = lastRewritten;
     }
 
-    // Hint for the toggle diff
     if (el.diffHint) el.diffHint.textContent = 'Green = added, red = removed. Toggle to view.';
 
-    // Auto re-score the rewritten resume (shows new score in Analysis)
+    // Force an immediate re-analyze of the rewritten text to show NEW score
     if (lastRewritten) {
-      await refreshScore(lastRewritten, jd);
+      setStatus('Re-scoring…');
+      const scored = await callFn('analyze', { resume: lastRewritten, jd });
+      renderAnalysis(scored);
     }
 
     setStatus('Done.');
@@ -120,15 +114,11 @@ el.rewriteBtn.addEventListener('click', async () => {
 
 /* ---------- Show changes toggle ---------- */
 el.showDiffBtn.addEventListener('click', () => {
-  if (!lastOriginal && !el.resumeText.value.trim()) {
-    return setStatus('No baseline to compare.');
-  }
-  // If user analyzed but didn’t rewrite, compare typed resume vs current rewritten view content (fallback)
   const base = lastOriginal || el.resumeText.value.trim();
   const revised = lastRewritten || stripHtml(el.rewritten.innerHTML);
+  if (!base || !revised) return setStatus('No baseline to compare.');
 
   if (el.diffBox.classList.contains('hidden')) {
-    // Generate and show diff
     el.diffBox.innerHTML = renderDiffHtml(base, revised);
     el.diffBox.classList.remove('hidden');
     el.showDiffBtn.textContent = 'Hide changes';
@@ -161,36 +151,32 @@ el.downloadBtn.addEventListener('click', () => {
   downloadText('rewritten-resume.txt', text);
 });
 
-/* ---------- Refresh score (analyze rewritten) ---------- */
-async function refreshScore(updatedResume, jd) {
-  try {
-    setStatus('Re-scoring…');
-    const res = await fetch('/.netlify/functions/tailor', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'analyze', resume: updatedResume, jd }),
-    });
-    const data = await res.json();
-    renderAnalysis(data); // updates match score / missing items
-    setStatus('Done.');
-  } catch (err) {
-    console.error(err);
-    setStatus('Error scoring new resume');
+/* ---------- Netlify function wrapper ---------- */
+async function callFn(action, payload) {
+  const res = await fetch('/.netlify/functions/tailor', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, ...payload })
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(t || `HTTP ${res.status}`);
   }
+  return res.json();
 }
 
 /* ---------- Render helpers ---------- */
 function renderAnalysis(data) {
-  const capText = data.capped_reason ? ` (capped: ${data.capped_reason})` : '';
-  el.scoreBox.innerHTML = `<div class="text-base">Match score: <span class="font-semibold">${Math.round(data.match_score || 0)}</span>/100${capText}</div>`;
+  const capText = data.capped_reason ? ` (capped: ${escapeHtml(data.capped_reason)})` : '';
+  const score = Math.round(Number(data.match_score || 0));
+  el.scoreBox.innerHTML = `<div class="text-base">Match score: <span class="font-semibold">${score}</span>/100${capText}</div>`;
 
   const chips = [];
   for (const t of data.missing_required || []) chips.push(`<span class="chip">${escapeHtml(t)}</span>`);
   for (const t of data.missing_nice || []) chips.push(`<span class="chip">${escapeHtml(t)}</span>`);
-  el.chips.innerHTML = chips.join(' ');
+  el.chips.innerHTML = chips.join(' ') || '<span class="text-xs text-gray-500">No gaps flagged.</span>';
 
-  el.flags.textContent = (data.flags || []).join(' · ');
-  renderSuggestions(data.bullet_suggestions || []);
+  el.flags.textContent = (data.flags || []).join(' · ') || '';
 }
 
 function renderSuggestions(list) {
@@ -216,7 +202,6 @@ function stripHtml(s) {
 }
 
 /* ---------- Diff utilities ---------- */
-// Inline bold adds: only show rewritten text, with <strong> around added tokens.
 function renderInlineBoldAdds(original, rewritten) {
   const dmp = new diff_match_patch();
   const diffs = dmp.diff_main(original, rewritten);
@@ -224,17 +209,13 @@ function renderInlineBoldAdds(original, rewritten) {
 
   const out = [];
   for (const [op, text] of diffs) {
-    if (op === 1) {
-      out.push('<strong>' + escapeHtml(text) + '</strong>'); // added
-    } else if (op === 0) {
-      out.push(escapeHtml(text)); // unchanged
-    }
-    // deletions are omitted in inline view
+    if (op === 1) out.push('<strong>' + escapeHtml(text) + '</strong>'); // added
+    else if (op === 0) out.push(escapeHtml(text)); // unchanged
+    // deletions omitted in inline view
   }
   return out.join('');
 }
 
-// Full diff view: show ins/del spans with color backgrounds.
 function renderDiffHtml(original, rewritten) {
   const dmp = new diff_match_patch();
   const diffs = dmp.diff_main(original, rewritten);
@@ -242,8 +223,8 @@ function renderDiffHtml(original, rewritten) {
 
   const frag = [];
   for (const [op, text] of diffs) {
-    if (op === -1) frag.push('<del>' + escapeHtml(text) + '</del>');      // removed (red)
-    else if (op === 1) frag.push('<ins>' + escapeHtml(text) + '</ins>');  // added (green)
+    if (op === -1) frag.push('<del>' + escapeHtml(text) + '</del>');      // red
+    else if (op === 1) frag.push('<ins>' + escapeHtml(text) + '</ins>');  // green
     else frag.push('<span>' + escapeHtml(text) + '</span>');
   }
   return frag.join('');
