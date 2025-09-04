@@ -6,7 +6,6 @@
   <title>ATS Tailor</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    .chip{border:1px solid #e5e7eb;padding:2px 8px;border-radius:9999px;font-size:12px}
     .card{background:#fff;border-radius:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);padding:20px}
     .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono','Courier New', monospace}
     #diffBox ins { background:#e6ffed; text-decoration:none; }
@@ -43,8 +42,6 @@
           <div id="status" class="text-sm text-gray-600"></div>
         </div>
         <div id="scoreBox" class="text-sm"></div>
-        <div id="chips" class="flex flex-wrap gap-2"></div>
-        <div id="flags" class="text-xs text-amber-700"></div>
       </div>
     </section>
 
@@ -54,8 +51,8 @@
         <button id="rewriteBtn" class="px-3 py-2 rounded-lg border">Rewrite</button>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div class="col-span-2">
+      <div class="grid grid-cols-1 gap-4">
+        <div>
           <div class="flex items-center justify-between mb-2">
             <div id="rewriteStatus" class="text-sm text-gray-600"></div>
             <div id="rewriteScoreBox" class="text-sm font-medium text-green-700"></div>
@@ -85,7 +82,9 @@
   </div>
 
   <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
-<script src="https://cdn.jsdelivr.net/gh/google/diff-match-patch/javascript/diff_match_patch.js"></script>
-  <script type="module" src="./js/main.js?v=10"></script>
+  <!-- Use JSDelivr GitHub path to avoid ORB; add crossorigin+referrerpolicy -->
+  <script src="https://cdn.jsdelivr.net/gh/google/diff-match-patch/javascript/diff_match_patch.js"
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script type="module" src="./js/main.js?v=12"></script>
 </body>
 </html>

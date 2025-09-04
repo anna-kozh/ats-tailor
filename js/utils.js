@@ -4,11 +4,7 @@ export async function readDocxAsText(file) {
   const result = await window.mammoth.extractRawText({ arrayBuffer });
   return result.value || '';
 }
-
-export async function readTextFile(file) {
-  return await file.text();
-}
-
+export async function readTextFile(file) { return await file.text(); }
 export function downloadText(filename, content) {
   const blob = new Blob([content], { type: 'text/plain' });
   const link = document.createElement('a');
@@ -16,5 +12,6 @@ export function downloadText(filename, content) {
   link.download = filename;
   document.body.appendChild(link);
   link.click();
-  document.body.removeChild(link);
+  URL.revokeObjectURL(link.href);
+  link.remove();
 }
