@@ -24,7 +24,9 @@ const el = {
 let lastOriginal = '';
 let lastRewritten = '';
 
+// ===================
 // File uploads
+// ===================
 el.resumeFile?.addEventListener('change', async e => {
   const file = e.target.files?.[0];
   if (!file) return;
@@ -40,7 +42,9 @@ async function readAnyText(file) {
   return await readTextFile(file);
 }
 
-// Analyze
+// ===================
+// Analyze resume
+// ===================
 el.analyzeBtn.addEventListener('click', async () => {
   const resume = el.resumeText.value.trim();
   const jd = el.jdText.value.trim();
@@ -62,7 +66,9 @@ el.analyzeBtn.addEventListener('click', async () => {
   }
 });
 
-// Rewrite
+// ===================
+// Rewrite resume
+// ===================
 el.rewriteBtn.addEventListener('click', async () => {
   const resume = el.resumeText.value.trim();
   const jd = el.jdText.value.trim();
@@ -76,31 +82,38 @@ el.rewriteBtn.addEventListener('click', async () => {
   try {
     const data = await callFn('rewrite', { resume, jd });
 
-    lastOriginal = resume;
-    lastRewritten = data.rewritten_resume || '';
+    // Make sure we always have safe defaults
+    lastOriginal = resume || '';
+    lastRewritten = typeof data.rewritten_resume === 'string' && data.rewritten_resume.trim()
+      ? data.rewritten_resume
+      : resume;
 
-    if (lastRewritten) {
-      const bolded = renderInlineBoldAdds(lastOriginal, lastRewritten);
-      el.rewritten.innerHTML = bolded;
-      el.resumeText.value = lastRewritten;
-    }
+    // Highlight bold changes safely
+    const bolded = renderInlineBoldAdds(lastOriginal, lastRewritten);
+    el.rewritten.innerHTML = bolded || escapeHtml(lastRewritten);
 
+    // Update textarea so next analyze uses the rewritten version
+    el.resumeText.value = lastRewritten;
+
+    // Update new score
     if (typeof data.final_score === 'number') {
       renderCompactScore(el.rewriteScoreBox, { match_score: data.final_score });
     } else {
       const scored = await callFn('analyze', { resume: lastRewritten, jd });
       renderCompactScore(el.rewriteScoreBox, scored);
     }
-    setRewriteStatus('Done.');
 
-    if (el.diffHint) el.diffHint.textContent = 'Green = added, red = removed. Toggle to view.';
+    setRewriteStatus('Done.');
+    el.diffHint.textContent = 'Green = added, red = removed. Toggle to view.';
   } catch (err) {
     console.error(err);
     setRewriteStatus('Error: ' + (err.message || 'unknown'));
   }
 });
 
-// Show changes
+// ===================
+// Show/hide changes
+// ===================
 el.showDiffBtn.addEventListener('click', () => {
   const base = lastOriginal || el.resumeText.value.trim();
   const revised = lastRewritten || stripHtml(el.rewritten.innerHTML);
@@ -120,7 +133,9 @@ function hideDiff() {
   el.showDiffBtn.textContent = 'Show changes';
 }
 
-// Copy / Download
+// ===================
+// Copy & Download
+// ===================
 el.copyBtn.addEventListener('click', async () => {
   const text = el.rewritten.innerText || '';
   if (!text.trim()) return setStatus('Nothing to copy.');
@@ -133,7 +148,9 @@ el.downloadBtn.addEventListener('click', () => {
   downloadText('rewritten-resume.txt', text);
 });
 
+// ===================
 // Helpers
+// ===================
 async function callFn(action, payload) {
   const res = await fetch('/.netlify/functions/tailor', {
     method: 'POST',
@@ -155,10 +172,12 @@ function setStatus(m) { el.status.textContent = m || ''; }
 function setRewriteStatus(m) { el.rewriteStatus.textContent = m || ''; }
 function stripHtml(s) { const d = document.createElement('div'); d.innerHTML = s || ''; return d.innerText; }
 
+// ===================
 // Diff utilities
+// ===================
 function renderInlineBoldAdds(original, rewritten) {
   const dmp = new diff_match_patch();
-  const diffs = dmp.diff_main(original, rewritten);
+  const diffs = dmp.diff_main(original || '', rewritten || '');
   dmp.diff_cleanupSemantic(diffs);
   return diffs.map(([op, text]) =>
     op === 1 ? '<strong>' + escapeHtml(text) + '</strong>' :
@@ -167,7 +186,7 @@ function renderInlineBoldAdds(original, rewritten) {
 }
 function renderDiffHtml(original, rewritten) {
   const dmp = new diff_match_patch();
-  const diffs = dmp.diff_main(original, rewritten);
+  const diffs = dmp.diff_main(original || '', rewritten || '');
   dmp.diff_cleanupSemantic(diffs);
   return diffs.map(([op, text]) =>
     op === -1 ? '<del>' + escapeHtml(text) + '</del>' :
@@ -176,5 +195,7 @@ function renderDiffHtml(original, rewritten) {
   ).join('');
 }
 function escapeHtml(s) {
-  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(s || '').replace(/&/g, '&amp;')
+                       .replace(/</g, '&lt;')
+                       .replace(/>/g, '&gt;');
 }
