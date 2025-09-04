@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Resume Tailor — OpenAI (Netlify)</title>
+  <title>ATS Tailor — OpenAI (Netlify)</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     .chip{border:1px solid #e5e7eb;padding:2px 8px;border-radius:9999px;font-size:12px}
@@ -11,7 +11,7 @@
     .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono','Courier New', monospace}
     /* diff styles */
     #diffBox ins { background:#e6ffed; text-decoration:none; }
-    #diffBox del { background:#ffeef0; }
+    #diffBox del { background:#ffeef0; text-decoration:none; }
     #diffBox span { background:transparent; }
     .hidden { display:none; }
   </style>
@@ -70,7 +70,11 @@
         </div>
         <div>
           <h3 class="font-medium mb-2">Updated Resume</h3>
-          <textarea id="rewritten" class="w-full h-80 p-3 border rounded-lg mono"></textarea>
+
+          <!-- CHANGED: textarea -> div to support bold highlights -->
+          <div id="rewritten"
+               class="w-full h-80 p-3 border rounded-lg mono whitespace-pre-wrap overflow-auto bg-white"
+               contenteditable="false" aria-label="Rewritten resume"></div>
 
           <!-- diff controls -->
           <div class="mt-4 flex items-center gap-3">
@@ -95,6 +99,6 @@
   <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
   <!-- diff lib for visual changes -->
   <script src="https://unpkg.com/diff-match-patch"></script>
-  <script type="module" src="./js/main.js?v=2"></script>
+  <script type="module" src="./js/main.js?v=3"></script>
 </body>
 </html>
