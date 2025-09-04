@@ -2,7 +2,7 @@
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4o-mini';
-const FETCH_TIMEOUT_MS = 30000; // bump to 30s
+const FETCH_TIMEOUT_MS = 30000; // 30s to avoid 502s
 
 export default async function handler(req) {
   if (req.method !== 'POST') return json({ error: 'Use POST' }, 405);
@@ -23,7 +23,8 @@ export default async function handler(req) {
     const { resume = '', jd = '' } = body || {};
     if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
     const gaps = await findGaps(resume, jd);
-    const rewritten = await rewritePass(resume, jd, gaps);
+    let rewritten = await rewritePass(resume, jd, gaps);
+    rewritten = sanitizeResume(rewritten);
     const score = await scorePair(rewritten || resume, jd);
     const missingAfter = await findGaps(rewritten || resume, jd);
     return json({
@@ -37,24 +38,20 @@ export default async function handler(req) {
     const { resume_v2 = '', jd = '', approved_keywords = [] } = body || {};
     if (!resume_v2 || !jd) return json({ error: 'Missing resume_v2 or jd' }, 400);
 
-    // Pass 1
     const initialMissing = await findGaps(resume_v2, jd);
     const merged = Array.from(new Set([...(approved_keywords||[]), ...initialMissing])).slice(0, 30);
-    let working = await rewritePass(resume_v2, jd, merged);
+
+    let working = sanitizeResume(await rewritePass(resume_v2, jd, merged));
     let score = await scorePair(working, jd);
 
-    // Optional Pass 2 (only if needed)
     if (score < 95) {
       const secondMissing = await findGaps(working, jd);
       const merged2 = Array.from(new Set([...(approved_keywords||[]), ...secondMissing])).slice(0, 30);
-      working = await rewritePass(working, jd, merged2);
+      working = sanitizeResume(await rewritePass(working, jd, merged2));
       score = await scorePair(working, jd);
-      const after = await findGaps(working, jd);
-      return json({ final_resume: working, final_score: score, missing_keywords_after: after.slice(0,24) });
-    } else {
-      const after = await findGaps(working, jd);
-      return json({ final_resume: working, final_score: score, missing_keywords_after: after.slice(0,24) });
     }
+    const after = await findGaps(working, jd);
+    return json({ final_resume: working, final_score: score, missing_keywords_after: after.slice(0,24) });
   }
 
   return json({ error: 'Unknown action' }, 400);
@@ -108,13 +105,16 @@ async function findGaps(resume, jd) {
 async function rewritePass(resume, jd, gaps = []) {
   const system = [
     'You are an expert ATS resume tailor. Maximize truthful overlap with the JD without fabrication.',
-    'Rewrite into a concise, metric-heavy resume (≤1000 words).',
-    'Include a short top section titled "Skills & Tools Match" listing exact JD phrases you can truthfully claim.',
-    'Use exact JD phrasing naturally in bullets and headings; avoid obvious keyword stuffing.',
+    'Distribute JD terms naturally across the resume:',
+    '- PROFESSIONAL SUMMARY: high-level scope, domains, leadership.',
+    '- EXPERIENCE BULLETS: tools, frameworks, metrics, outcomes; integrate JD phrases directly into bullet text.',
+    '- SKILLS & TOOLS MATCH: only remaining high-impact terms not already used elsewhere; hard cap 10 unique items.',
+    'Never dump a long keyword list. Prefer weaving terms once or twice where they read naturally.',
     'Keep employers and dates intact; edit wording for clarity and impact.',
-    gaps.length ? `Prioritize weaving these JD terms (only if truthful): ${gaps.join(', ')}.`
+    gaps.length ? `Prioritize weaving these truthful JD terms across summary/experience; put leftovers in Skills (max 10): ${gaps.join(', ')}.`
                 : 'Use only what is reasonably inferable from the original; do not invent experience.',
-    'Return ONLY JSON: { "rewritten_resume": string }.'
+    'Return ONLY JSON: { "rewritten_resume": string }.',
+    'Style: concise, metric-forward bullets; avoid fluff; no duplicate keywords.'
   ].join(' ');
   const user = JSON.stringify({ resume, jd });
   const data = await openAI({
@@ -126,9 +126,43 @@ async function rewritePass(resume, jd, gaps = []) {
     temperature: 0.4,
     top_p: 1,
     response_format: { type: 'json_object' },
-    max_tokens: 1000
+    max_tokens: 1100
   });
   return String(data?.rewritten_resume || '').trim();
+}
+
+/** Sanitize: enforce <=10 skills in the Skills block and dedupe items */
+function sanitizeResume(text = '') {
+  try {
+    const lines = text.split(/\r?\n/);
+    const start = lines.findIndex(l => /skills\s*&\s*tools\s*match/i.test(l));
+    if (start === -1) return text;
+    // collect until blank line or next heading
+    let i = start + 1;
+    const buf = [];
+    while (i < lines.length && !/^[A-Z][A-Z \-]{3,}$/.test(lines[i]) && lines[i].trim() !== '') {
+      buf.push(lines[i].trim());
+      i++;
+    }
+    const raw = buf.join(' ');
+    const items = Array.from(new Set(
+      raw
+        .replace(/^[\-\*\u2022]\s*/gm,'')
+        .split(/[•\-\*]|,|·|\n/)
+        .map(s => s.trim())
+        .filter(Boolean)
+    ));
+    const limited = items.slice(0, 10);
+    const formatted = limited.map(it => `- ${it}`).join('\n');
+
+    // rebuild
+    const newLines = lines.slice(0, start + 1) \
+      .concat([formatted, '']) \
+      .concat(lines.slice(i));
+    return newLines.join('\n');
+  } catch {
+    return text;
+  }
 }
 
 async function openAI(payload) {
