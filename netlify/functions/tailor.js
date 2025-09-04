@@ -2,7 +2,6 @@
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4o-mini';
-
 const FETCH_TIMEOUT_MS = 8500;
 const MAX_TOKENS_REWRITE = 1400;
 
@@ -21,26 +20,37 @@ export default async function handler(req) {
     return json({ match_score: score });
   }
 
-  // single-pass rewrite; client can loop up to 3 passes
   if (action === 'rewrite') {
     const { resume = '', jd = '' } = body || {};
     if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
-    const gaps = await findGaps(resume, jd);
-    const rewritten = await rewritePass(resume, jd, gaps);
+
+    // single-pass rewrite
+    const gapsBefore = await findGaps(resume, jd);
+    const rewritten = await rewritePass(resume, jd, gapsBefore);
     const score = await scorePair(rewritten || resume, jd);
-    return json({ rewritten_resume: rewritten || resume, final_score: score });
+
+    // compute missing AFTER rewrite (the actionable list user can add)
+    const missingAfter = await findGaps(rewritten || resume, jd);
+    const suggested = buildSuggestedSkillsBlock(missingAfter);
+
+    return json({
+      rewritten_resume: rewritten || resume,
+      final_score: score,
+      missing_keywords: missingAfter,
+      suggested_skills_section: suggested
+    });
   }
 
   return json({ error: 'Unknown action' }, 400);
 }
 
-/** ---- helpers ---- */
+/** ----- helpers ----- */
 async function scorePair(resume, jd) {
   const system = [
-    'You are an ATS evaluator. Return JSON only: { "match_score": number }.',
+    'You are an ATS evaluator. Return ONLY JSON: { "match_score": number }.',
     'Score 0-100. Heavily weight exact JD phrase overlap (skills, tools, domains, certifications).',
-    'Reward a visible "Skills & Tools Match" section using JD phrases when truthful.',
-    'Penalize fluff or claims not present in the text. Do not infer unstated skills.'
+    'Reward a visible "Skills & Tools Match" section using exact JD phrases when truthful.',
+    'Penalize fluff and claims not present in the resume text; do not infer unstated skills.'
   ].join(' ');
   const user = JSON.stringify({ resume, jd });
   const data = await openAI({
@@ -58,9 +68,10 @@ async function scorePair(resume, jd) {
 
 async function findGaps(resume, jd) {
   const system = [
-    'Extract concrete JD keywords/phrases absent or weak in the resume.',
-    'Return JSON only: { "missing_keywords": string[] }. Max 30.',
-    'Focus on hard skills, tools, frameworks, domains, and exact phrases.'
+    'Extract concrete, ATS-relevant JD keywords/phrases that are absent or weak in the resume.',
+    'Return ONLY JSON: { "missing_keywords": string[] }.',
+    'Max 30 items. Focus on hard skills, tools, domains, frameworks, certifications, exact phrases.',
+    'No soft skills. No hallucinations.'
   ].join(' ');
   const user = JSON.stringify({ resume, jd });
   const data = await openAI({
@@ -79,14 +90,14 @@ async function findGaps(resume, jd) {
 
 async function rewritePass(resume, jd, gaps = []) {
   const system = [
-    'You are an expert ATS resume tailor. Goal: maximize truthful keyword/phrase overlap with the JD.',
+    'You are an expert ATS resume tailor. Maximize truthful overlap with the JD without fabrication.',
     'Rewrite into a concise, metric-heavy resume (≤1200 words).',
-    'Insert a short top section titled "Skills & Tools Match" that lists exact JD keywords you can truthfully claim.',
-    'Use exact JD phrasing naturally in bullets and headings; no obvious keyword stuffing.',
+    'Include a short top section titled "Skills & Tools Match" listing exact JD phrases you can truthfully claim.',
+    'Use exact JD phrasing naturally in bullets and headings; avoid obvious keyword stuffing.',
     'Prefer active verbs and quant results; keep employers and dates intact.',
     gaps.length ? `Prioritize weaving these JD terms (only if truthful): ${gaps.join(', ')}.`
-                : 'Use only what can be reasonably inferred from the original. Do not invent experience.',
-    'Return JSON only: { "rewritten_resume": string }.'
+                : 'Use only what is reasonably inferable from the original; do not invent experience.',
+    'Return ONLY JSON: { "rewritten_resume": string }.'
   ].join(' ');
   const user = JSON.stringify({ resume, jd });
   const data = await openAI({
@@ -101,6 +112,12 @@ async function rewritePass(resume, jd, gaps = []) {
     max_tokens: MAX_TOKENS_REWRITE
   });
   return String(data?.rewritten_resume || '').trim();
+}
+
+function buildSuggestedSkillsBlock(missingKeywords = []) {
+  if (!Array.isArray(missingKeywords) || missingKeywords.length === 0) return '';
+  const list = [...new Set(missingKeywords)].slice(0, 24).join(' · ');
+  return `Skills & Tools Match:\n${list}`;
 }
 
 async function openAI(payload) {
