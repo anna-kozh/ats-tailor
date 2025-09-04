@@ -5,11 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ATS Tailor</title>
   <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- Diff highlights + basics -->
   <style>
     .card{background:#fff;border-radius:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);padding:20px}
-    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono','Courier New', monospace}
     #diffBox ins { background:#e6ffed; text-decoration:none; }
     #diffBox del { background:#ffeef0; text-decoration:none; }
     #diffBox span { background:transparent; }
@@ -22,24 +20,20 @@
       <span class="text-xs text-gray-600">Private: your key stays on Netlify</span>
     </header>
 
-    <!-- Inputs -->
     <section class="grid grid-cols-1 lg:grid-cols-3 gap-5">
-      <!-- Resume -->
       <div class="card space-y-3">
         <h2 class="font-semibold">Resume</h2>
-        <input id="resumeFile" type="file" accept=".docx,.txt" class="block w-full text-sm" />
+        <input id="resumeFile" type="file" accept=".docx,.txt" class="block w-full text-sm">
         <textarea id="resumeText" class="w-full h-64 p-3 border rounded-lg" placeholder="Paste resume text"></textarea>
         <p class="text-xs text-gray-500">Tip: .docx parses best.</p>
       </div>
 
-      <!-- JD -->
       <div class="card space-y-3">
         <h2 class="font-semibold">Job Description</h2>
-        <input id="jdFile" type="file" accept=".docx,.txt" class="block w-full text-sm" />
+        <input id="jdFile" type="file" accept=".docx,.txt" class="block w-full text-sm">
         <textarea id="jdText" class="w-full h-64 p-3 border rounded-lg" placeholder="Paste the JD here"></textarea>
       </div>
 
-      <!-- Analysis -->
       <div class="card space-y-4">
         <h2 class="font-semibold">Analysis</h2>
         <div class="flex items-center gap-3">
@@ -50,32 +44,27 @@
       </div>
     </section>
 
-    <!-- Tailored Draft -->
     <section class="card space-y-3">
       <div class="flex items-center justify-between">
         <h2 class="font-semibold">Tailored Draft</h2>
         <button id="rewriteBtn" class="px-3 py-2 rounded-lg border">Rewrite</button>
       </div>
 
-      <!-- New score above rewritten resume -->
       <div class="flex items-center justify-between mb-2">
         <div id="rewriteStatus" class="text-sm text-gray-600"></div>
         <div id="rewriteScoreBox" class="text-sm font-medium text-green-700"></div>
       </div>
 
-      <!-- Rewritten resume (inline bold for adds) -->
       <div id="rewritten"
            class="w-full h-80 p-3 border rounded-lg mono whitespace-pre-wrap overflow-auto bg-white"
            contenteditable="false" aria-label="Rewritten resume"></div>
 
-      <!-- Diff controls -->
       <div class="mt-4 flex items-center gap-3">
         <button id="showDiffBtn" class="px-3 py-2 rounded-lg border text-sm">Show changes</button>
         <span id="diffHint" class="text-xs text-gray-500"></span>
       </div>
       <div id="diffBox" class="mt-3 p-3 border rounded-lg mono whitespace-pre-wrap text-sm hidden"></div>
 
-      <!-- Utilities -->
       <div class="mt-3 flex gap-3">
         <button id="copyBtn" class="px-3 py-2 rounded-lg border text-sm">Copy</button>
         <button id="downloadBtn" class="px-3 py-2 rounded-lg border text-sm">Download .txt</button>
@@ -87,13 +76,8 @@
     </footer>
   </div>
 
-  <!-- Libraries -->
   <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
-  <!-- Stable diff-match-patch (avoids ORB issues) -->
-  <script src="https://cdn.jsdelivr.net/gh/google/diff-match-patch/javascript/diff_match_patch.js"
-          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-
-  <!-- App -->
-  <script type="module" src="./js/main.js?v=14"></script>
+  <script src="https://unpkg.com/diff-match-patch@1.0.5/diff_match_patch.js"></script>
+  <script type="module" src="./js/main.js?v=20"></script>
 </body>
 </html>

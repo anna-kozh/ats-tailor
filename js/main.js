@@ -22,10 +22,9 @@ const el = {
 
 let lastOriginal = '';
 let lastRewritten = '';
-// debug mirror so we can introspect in console
 window._ats = { lastOriginal: '', lastRewritten: '' };
 
-/* ---------------- File uploads ---------------- */
+/* --------- File uploads --------- */
 el.resumeFile?.addEventListener('change', async (e) => {
   const f = e.target.files?.[0]; if (!f) return;
   el.resumeText.value = await readAnyText(f);
@@ -39,7 +38,7 @@ async function readAnyText(file) {
   return await readTextFile(file);
 }
 
-/* ---------------- Analyze ---------------- */
+/* --------- Analyze --------- */
 el.analyzeBtn.addEventListener('click', async () => {
   const resume = el.resumeText.value.trim();
   const jd = el.jdText.value.trim();
@@ -60,15 +59,15 @@ el.analyzeBtn.addEventListener('click', async () => {
   }
 });
 
-/* ---------------- Rewrite ---------------- */
+/* --------- Rewrite --------- */
 el.rewriteBtn.addEventListener('click', async () => {
   const resume = el.resumeText.value.trim();
   const jd = el.jdText.value.trim();
   if (!resume || !jd) return setRewriteStatus('Add both resume + JD.');
 
-  // capture original immediately so Show changes works even if request fails
+  // capture original immediately so diff has a baseline even if request fails
   lastOriginal = String(resume || '');
-  lastRewritten = ''; // will fill after response
+  lastRewritten = '';
   window._ats = { lastOriginal, lastRewritten };
 
   el.rewritten.innerHTML = '';
@@ -83,10 +82,10 @@ el.rewriteBtn.addEventListener('click', async () => {
     lastRewritten = (serverText && serverText.trim()) ? serverText : lastOriginal;
     window._ats = { lastOriginal, lastRewritten };
 
-    // render inline bold adds; never crash
+    // render inline bold adds; safe fallback
     try {
       const html = renderInlineBoldAdds(lastOriginal, lastRewritten);
-      el.rewritten.innerHTML = html || escapeHtml(lastRewritten);
+      el.rewritten.innerHTML = html && html.trim() ? html : escapeHtml(lastRewritten);
     } catch (e) {
       console.warn('inline diff failed; fallback to text', e);
       el.rewritten.textContent = lastRewritten;
@@ -101,7 +100,7 @@ el.rewriteBtn.addEventListener('click', async () => {
       renderCompactScore(el.rewriteScoreBox, scored || { match_score: 0 });
     }
 
-    // IMPORTANT: do NOT overwrite original textarea
+    // DO NOT overwrite original textarea
     // el.resumeText.value = lastRewritten;
 
     setRewriteStatus('Done.');
@@ -112,7 +111,7 @@ el.rewriteBtn.addEventListener('click', async () => {
   }
 });
 
-/* ---------------- Show / hide changes ---------------- */
+/* --------- Show / hide changes --------- */
 el.showDiffBtn.addEventListener('click', () => {
   const base = lastOriginal || el.resumeText.value.trim();
   const revised = lastRewritten || stripHtml(el.rewritten.innerHTML);
@@ -121,14 +120,13 @@ el.showDiffBtn.addEventListener('click', () => {
   if (el.diffBox.classList.contains('hidden')) {
     try {
       const html = renderDiffHtml(base, revised);
-      // fallback to plain text if diff lib returns empty/whitespace
       el.diffBox.innerHTML = html && html.trim() ? html : escapeHtml(revised);
     } catch (e) {
       console.warn('diff render failed; showing plain text', e);
       el.diffBox.textContent = revised;
     }
     el.diffBox.classList.remove('hidden');
-    el.diffBox.style.display = 'block'; // extra guard
+    el.diffBox.style.display = 'block';
     el.showDiffBtn.textContent = 'Hide changes';
   } else {
     hideDiff();
@@ -137,11 +135,11 @@ el.showDiffBtn.addEventListener('click', () => {
 function hideDiff() {
   el.diffBox.classList.add('hidden');
   el.diffBox.innerHTML = '';
-  el.diffBox.style.display = ''; // reset
+  el.diffBox.style.display = '';
   el.showDiffBtn.textContent = 'Show changes';
 }
 
-/* ---------------- Copy / Download ---------------- */
+/* --------- Copy / Download --------- */
 el.copyBtn.addEventListener('click', async () => {
   const text = el.rewritten.innerText || '';
   if (!text.trim()) return setStatus('Nothing to copy.');
@@ -154,7 +152,7 @@ el.downloadBtn.addEventListener('click', () => {
   downloadText('rewritten-resume.txt', text);
 });
 
-/* ---------------- Helpers ---------------- */
+/* --------- Helpers --------- */
 async function callFn(action, payload) {
   const res = await fetch('/.netlify/functions/tailor', {
     method: 'POST',
@@ -165,7 +163,7 @@ async function callFn(action, payload) {
     const t = await res.text().catch(() => '');
     throw new Error(t || `HTTP ${res.status}`);
   }
-  try { return await res.json(); } catch { return {}; } // never crash on bad JSON
+  try { return await res.json(); } catch { return {}; }
 }
 function renderCompactScore(target, data) {
   const score = Math.round(Number(data?.match_score ?? 0));
@@ -176,16 +174,15 @@ function setRewriteStatus(m) { el.rewriteStatus.textContent = m || ''; }
 function stripHtml(s) { const d = document.createElement('div'); d.innerHTML = s || ''; return d.innerText; }
 function escapeHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-/* ---------------- Diff utilities (defensive) ---------------- */
+/* --------- Diff utilities (robust) --------- */
 function ensureDmp() {
-  if (typeof diff_match_patch !== 'function') throw new Error('diff_match_patch not loaded');
-  return new diff_match_patch();
+  return (typeof diff_match_patch === 'function') ? new diff_match_patch() : null;
 }
 function renderInlineBoldAdds(original, rewritten) {
   const dmp = ensureDmp();
+  if (!dmp) return escapeHtml(String(rewritten ?? ''));
   const diffs = dmp.diff_main(String(original ?? ''), String(rewritten ?? ''));
   dmp.diff_cleanupSemantic(diffs);
-
   if (!Array.isArray(diffs)) return escapeHtml(String(rewritten ?? ''));
   let out = '';
   for (let i = 0; i < diffs.length; i++) {
@@ -199,9 +196,9 @@ function renderInlineBoldAdds(original, rewritten) {
 }
 function renderDiffHtml(original, rewritten) {
   const dmp = ensureDmp();
+  if (!dmp) return escapeHtml(String(rewritten ?? ''));
   const diffs = dmp.diff_main(String(original ?? ''), String(rewritten ?? ''));
   dmp.diff_cleanupSemantic(diffs);
-
   if (!Array.isArray(diffs)) return escapeHtml(String(rewritten ?? ''));
   let out = '';
   for (let i = 0; i < diffs.length; i++) {
