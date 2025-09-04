@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Resume Tailor — 100% client-side</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .chip { border: 1px solid #e5e7eb; padding: 2px 8px; border-radius: 9999px; font-size: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .card { background:#fff; border-radius:16px; box-shadow:0 1px 4px rgba(0,0,0,.06); padding:20px; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div class="max-w-7xl mx-auto p-6 space-y-6">
+    <header class="flex items-center justify-between">
+      <h1 class="text-2xl font-bold">Resume Tailor (Free & Local)</h1>
+      <div class="text-xs text-gray-600">Runs in your browser. No server. No keys.</div>
+    </header>
+
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div class="card space-y-3">
+        <h2 class="font-semibold">Resume</h2>
+        <input id="resumeFile" type="file" accept=".docx,.txt" class="block w-full text-sm">
+        <textarea id="resumeText" class="w-full h-64 p-3 border rounded-lg" placeholder="Paste resume text here"></textarea>
+        <div class="text-xs text-gray-500">Tip: .docx parses best. Fancy templates may lose structure.</div>
+      </div>
+
+      <div class="card space-y-3">
+        <h2 class="font-semibold">Job Description</h2>
+        <input id="jdFile" type="file" accept=".docx,.txt" class="block w-full text-sm">
+        <textarea id="jdText" class="w-full h-64 p-3 border rounded-lg" placeholder="Paste the job description here"></textarea>
+        <div class="text-xs text-gray-500">Add complete JD text. The analysis extracts must-haves automatically.</div>
+      </div>
+
+      <div class="card space-y-4">
+        <h2 class="font-semibold">Analysis</h2>
+        <div class="flex items-center gap-3">
+          <button id="analyzeBtn" class="px-3 py-2 rounded-lg bg-black text-white text-sm">Analyze</button>
+          <div id="status" class="text-sm text-gray-600"></div>
+        </div>
+        <div id="scoreBox" class="text-sm"></div>
+        <div id="chips" class="flex flex-wrap gap-2"></div>
+        <div id="flags" class="text-xs text-amber-700"></div>
+      </div>
+    </section>
+
+    <section class="card space-y-3">
+      <div class="flex items-center justify-between">
+        <h2 class="font-semibold">Tailored Draft</h2>
+        <div class="flex items-center gap-3 text-sm">
+          <label class="flex items-center gap-2">
+            <input type="radio" name="mode" value="conservative" checked> Conservative
+          </label>
+          <label class="flex items-center gap-2">
+            <input type="radio" name="mode" value="aggressive"> Aggressive
+          </label>
+          <button id="rewriteBtn" class="px-3 py-2 rounded-lg border">Rewrite</button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div>
+          <h3 class="font-medium mb-2">Suggestions</h3>
+          <ul id="suggested" class="list-disc pl-6 text-sm"></ul>
+        </div>
+        <div>
+          <h3 class="font-medium mb-2">Updated Resume</h3>
+          <textarea id="rewritten" class="w-full h-80 p-3 border rounded-lg mono"></textarea>
+          <div class="mt-3 flex gap-3">
+            <button id="copyBtn" class="px-3 py-2 rounded-lg border text-sm">Copy</button>
+            <button id="downloadBtn" class="px-3 py-2 rounded-lg border text-sm">Download .txt</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="text-xs text-gray-500 py-6">
+      Powered by <a class="underline" href="https://github.com/xenova/transformers.js" target="_blank">Transformers.js</a> and <a class="underline" href="https://github.com/mwilliamson/mammoth.js" target="_blank">Mammoth</a>. All processing happens locally in your browser.
+    </footer>
+  </div>
+
+  <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
