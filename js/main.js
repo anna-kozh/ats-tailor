@@ -22,9 +22,12 @@ const el = {
 
 let lastOriginal = '';
 let lastRewritten = '';
+const TARGET = 95;
+const MAX_PASSES = 6;
+
 window._ats = { lastOriginal: '', lastRewritten: '' };
 
-/* --------- File uploads --------- */
+/* ---------- File uploads ---------- */
 el.resumeFile?.addEventListener('change', async (e) => {
   const f = e.target.files?.[0]; if (!f) return;
   el.resumeText.value = await readAnyText(f);
@@ -38,7 +41,7 @@ async function readAnyText(file) {
   return await readTextFile(file);
 }
 
-/* --------- Analyze --------- */
+/* ---------- Analyze ---------- */
 el.analyzeBtn.addEventListener('click', async () => {
   const resume = el.resumeText.value.trim();
   const jd = el.jdText.value.trim();
@@ -50,8 +53,7 @@ el.analyzeBtn.addEventListener('click', async () => {
 
   try {
     const data = await callFn('analyze', { resume, jd });
-    const score = Math.round(Number(data?.match_score ?? 0));
-    el.scoreBox.innerHTML = `<div class="text-base">Match score: <span class="font-semibold">${score}</span>/100</div>`;
+    renderCompactScore(el.scoreBox, data);
     setStatus('Done.');
   } catch (err) {
     console.error(err);
@@ -59,14 +61,13 @@ el.analyzeBtn.addEventListener('click', async () => {
   }
 });
 
-/* --------- Rewrite (loops server-side to ≥95) --------- */
+/* ---------- Rewrite: loop client-side to hit ≥95 ---------- */
 el.rewriteBtn.addEventListener('click', async () => {
-  const resume = el.resumeText.value.trim();
   const jd = el.jdText.value.trim();
-  if (!resume || !jd) return setRewriteStatus('Add both resume + JD.');
+  let current = el.resumeText.value.trim();
+  if (!current || !jd) return setRewriteStatus('Add both resume + JD.');
 
-  // baseline for diff
-  lastOriginal = String(resume || '');
+  lastOriginal = current;
   lastRewritten = '';
   window._ats = { lastOriginal, lastRewritten };
 
@@ -74,44 +75,45 @@ el.rewriteBtn.addEventListener('click', async () => {
   el.rewriteScoreBox.innerHTML = '';
   hideDiff();
 
-  setRewriteStatus('Rewriting to ≥95…');
+  setRewriteStatus('Rewriting…');
+  let bestScore = 0;
+  let i = 0;
+
   try {
-    const data = await callFn('rewrite', { resume, jd });
+    for (i = 1; i <= MAX_PASSES; i++) {
+      setRewriteStatus(`Pass ${i}/${MAX_PASSES}…`);
 
-    const serverText = (data && typeof data.rewritten_resume === 'string') ? data.rewritten_resume : '';
-    lastRewritten = (serverText && serverText.trim()) ? serverText : lastOriginal;
+      // Single, fast server pass
+      const data = await callFn('rewrite_pass', { resume: current, jd });
+      const next = String(data?.rewritten_resume || current);
+      const score = Math.round(Number(data?.match_score ?? 0));
+
+      // update current and UI preview each pass (bold additions)
+      current = next;
+      bestScore = score;
+
+      try {
+        const html = renderInlineBoldAdds(lastOriginal, current);
+        el.rewritten.innerHTML = html && html.trim() ? html : escapeHtml(current);
+      } catch {
+        el.rewritten.textContent = current;
+      }
+      renderCompactScore(el.rewriteScoreBox, { match_score: score });
+
+      if (score >= TARGET) break;
+    }
+
+    lastRewritten = current;
     window._ats = { lastOriginal, lastRewritten };
-
-    // Render with inline bold for additions
-    try {
-      const html = renderInlineBoldAdds(lastOriginal, lastRewritten);
-      el.rewritten.innerHTML = html && html.trim() ? html : escapeHtml(lastRewritten);
-    } catch (e) {
-      console.warn('inline diff failed; fallback to text', e);
-      el.rewritten.textContent = lastRewritten;
-    }
-
-    // Score box (server already looped)
-    const serverScore = Number.isFinite(Number(data?.final_score)) ? Number(data.final_score) : null;
-    if (serverScore !== null) {
-      renderCompactScore(el.rewriteScoreBox, { match_score: serverScore });
-    } else {
-      const scored = await callFn('analyze', { resume: lastRewritten, jd });
-      renderCompactScore(el.rewriteScoreBox, scored || { match_score: 0 });
-    }
-
-    // Status w/ pass count
-    const iters = Number(data?.iterations) || 1;
-    const target = Number(data?.target) || 95;
-    setRewriteStatus(`Done in ${iters} pass${iters === 1 ? '' : 'es'} (target ${target}).`);
-    if (el.diffHint) el.diffHint.textContent = 'Green = added, red = removed. Toggle to view.';
+    setRewriteStatus(`Done in ${i} pass${i === 1 ? '' : 'es'} (target ${TARGET}).`);
+    if (el.diffHint) el.diffHint.textContent = 'Green = added, red = removed.';
   } catch (err) {
     console.error(err);
     setRewriteStatus('Error: ' + (err.message || 'unknown'));
   }
 });
 
-/* --------- Show / hide changes --------- */
+/* ---------- Show / hide changes (green adds, red deletes) ---------- */
 el.showDiffBtn.addEventListener('click', () => {
   const base = lastOriginal || el.resumeText.value.trim();
   const revised = lastRewritten || stripHtml(el.rewritten.innerHTML);
@@ -119,7 +121,7 @@ el.showDiffBtn.addEventListener('click', () => {
 
   if (el.diffBox.classList.contains('hidden')) {
     try {
-      const html = renderDiffHtml(base, revised); // uses <del> (red) and <ins> (green)
+      const html = renderDiffHtml(base, revised); // <ins> green, <del> red
       el.diffBox.innerHTML = html && html.trim() ? html : escapeHtml(revised);
     } catch (e) {
       console.warn('diff render failed; showing plain text', e);
@@ -139,7 +141,7 @@ function hideDiff() {
   el.showDiffBtn.textContent = 'Show changes';
 }
 
-/* --------- Copy / Download --------- */
+/* ---------- Copy / Download ---------- */
 el.copyBtn.addEventListener('click', async () => {
   const text = el.rewritten.innerText || '';
   if (!text.trim()) return setStatus('Nothing to copy.');
@@ -152,17 +154,14 @@ el.downloadBtn.addEventListener('click', () => {
   downloadText('rewritten-resume.txt', text);
 });
 
-/* --------- Helpers --------- */
+/* ---------- Shared helpers ---------- */
 async function callFn(action, payload) {
   const res = await fetch('/.netlify/functions/tailor', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, ...payload })
   });
-  if (!res.ok) {
-    const t = await res.text().catch(() => '');
-    throw new Error(t || `HTTP ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   try { return await res.json(); } catch { return {}; }
 }
 function renderCompactScore(target, data) {
@@ -174,7 +173,7 @@ function setRewriteStatus(m) { el.rewriteStatus.textContent = m || ''; }
 function stripHtml(s) { const d = document.createElement('div'); d.innerHTML = s || ''; return d.innerText; }
 function escapeHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-/* --------- Diff utilities --------- */
+/* ---------- Diff utilities ---------- */
 function ensureDmp() {
   return (typeof diff_match_patch === 'function') ? new diff_match_patch() : null;
 }
@@ -183,14 +182,10 @@ function renderInlineBoldAdds(original, rewritten) {
   if (!dmp) return escapeHtml(String(rewritten ?? ''));
   const diffs = dmp.diff_main(String(original ?? ''), String(rewritten ?? ''));
   dmp.diff_cleanupSemantic(diffs);
-  if (!Array.isArray(diffs)) return escapeHtml(String(rewritten ?? ''));
   let out = '';
-  for (let i = 0; i < diffs.length; i++) {
-    const item = diffs[i];
-    const op = Array.isArray(item) ? item[0] : (item?.operation ?? item?.op ?? 0);
-    const text = Array.isArray(item) ? item[1] : (item?.text ?? '');
-    if (op === 1) out += '<strong>' + escapeHtml(text) + '</strong>';     // additions bold
-    else if (op === 0) out += escapeHtml(text);                             // unchanged
+  for (const [op, text] of diffs) {
+    if (op === 1) out += '<strong>' + escapeHtml(text) + '</strong>'; // additions bold
+    else if (op === 0) out += escapeHtml(text);
   }
   return out || escapeHtml(String(rewritten ?? ''));
 }
@@ -199,14 +194,10 @@ function renderDiffHtml(original, rewritten) {
   if (!dmp) return escapeHtml(String(rewritten ?? ''));
   const diffs = dmp.diff_main(String(original ?? ''), String(rewritten ?? ''));
   dmp.diff_cleanupSemantic(diffs);
-  if (!Array.isArray(diffs)) return escapeHtml(String(rewritten ?? ''));
   let out = '';
-  for (let i = 0; i < diffs.length; i++) {
-    const item = diffs[i];
-    const op = Array.isArray(item) ? item[0] : (item?.operation ?? item?.op ?? 0);
-    const text = Array.isArray(item) ? item[1] : (item?.text ?? '');
-    if (op === -1) out += '<del>' + escapeHtml(text) + '</del>';            // red background via CSS
-    else if (op === 1) out += '<ins>' + escapeHtml(text) + '</ins>';        // green background via CSS
+  for (const [op, text] of diffs) {
+    if (op === -1) out += '<del>' + escapeHtml(text) + '</del>';   // red via CSS
+    else if (op === 1) out += '<ins>' + escapeHtml(text) + '</ins>'; // green via CSS
     else out += '<span>' + escapeHtml(text) + '</span>';
   }
   return out || escapeHtml(String(rewritten ?? ''));
