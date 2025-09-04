@@ -9,6 +9,11 @@
     .chip{border:1px solid #e5e7eb;padding:2px 8px;border-radius:9999px;font-size:12px}
     .card{background:#fff;border-radius:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);padding:20px}
     .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono','Courier New', monospace}
+    /* diff styles */
+    #diffBox ins { background:#e6ffed; text-decoration:none; }
+    #diffBox del { background:#ffeef0; }
+    #diffBox span { background:transparent; }
+    .hidden { display:none; }
   </style>
 </head>
 <body class="bg-gray-50 text-gray-900">
@@ -66,6 +71,14 @@
         <div>
           <h3 class="font-medium mb-2">Updated Resume</h3>
           <textarea id="rewritten" class="w-full h-80 p-3 border rounded-lg mono"></textarea>
+
+          <!-- diff controls -->
+          <div class="mt-4 flex items-center gap-3">
+            <button id="showDiffBtn" class="px-3 py-2 rounded-lg border text-sm">Show changes</button>
+            <span id="diffHint" class="text-xs text-gray-500"></span>
+          </div>
+          <div id="diffBox" class="mt-3 p-3 border rounded-lg mono text-sm hidden"></div>
+
           <div class="mt-3 flex gap-3">
             <button id="copyBtn" class="px-3 py-2 rounded-lg border text-sm">Copy</button>
             <button id="downloadBtn" class="px-3 py-2 rounded-lg border text-sm">Download .txt</button>
@@ -80,6 +93,8 @@
   </div>
 
   <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
-  <script type="module" src="./js/main.js?v=1"></script>
+  <!-- diff lib for visual changes -->
+  <script src="https://unpkg.com/diff-match-patch"></script>
+  <script type="module" src="./js/main.js?v=2"></script>
 </body>
 </html>
