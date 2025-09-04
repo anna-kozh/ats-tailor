@@ -22,10 +22,6 @@ const el = {
 
 let lastOriginal = '';
 let lastRewritten = '';
-const TARGET = 95;
-const MAX_PASSES = 3;
-
-window._ats = { lastOriginal: '', lastRewritten: '' };
 
 /* ---------- File uploads ---------- */
 el.resumeFile?.addEventListener('change', async (e) => {
@@ -61,46 +57,29 @@ el.analyzeBtn.addEventListener('click', async () => {
   }
 });
 
-/* ---------- Rewrite: loop client-side to hit ≥95 (max 3 passes) ---------- */
+/* ---------- Rewrite: ONE PASS ---------- */
 el.rewriteBtn.addEventListener('click', async () => {
   const jd = el.jdText.value.trim();
-  let current = el.resumeText.value.trim();
-  if (!current || !jd) return setRewriteStatus('Add both resume + JD.');
+  const resume = el.resumeText.value.trim();
+  if (!resume || !jd) return setRewriteStatus('Add both resume + JD.');
 
-  lastOriginal = current;
+  lastOriginal = resume;
   lastRewritten = '';
-  window._ats = { lastOriginal, lastRewritten };
-
   el.rewritten.innerHTML = '';
   el.rewriteScoreBox.innerHTML = '';
   hideDiff();
 
   setRewriteStatus('Rewriting…');
-  let score = 0;
-  let i = 0;
-
   try {
-    for (i = 1; i <= MAX_PASSES; i++) {
-      setRewriteStatus(`Pass ${i}/${MAX_PASSES}…`);
-      const data = await callFn('rewrite', { resume: current, jd });
-      current = String(data?.rewritten_resume || current);
-      score = Math.round(Number(data?.final_score ?? 0));
+    const data = await callFn('rewrite', { resume, jd });
+    lastRewritten = String(data?.rewritten_resume || resume);
 
-      // show incremental bold adds
-      try {
-        const html = renderInlineBoldAdds(lastOriginal, current);
-        el.rewritten.innerHTML = html && html.trim() ? html : escapeHtml(current);
-      } catch {
-        el.rewritten.textContent = current;
-      }
-      renderCompactScore(el.rewriteScoreBox, { match_score: score });
+    // Show rewritten with bold additions relative to original
+    el.rewritten.innerHTML = renderInlineBoldAdds(lastOriginal, lastRewritten);
 
-      if (score >= TARGET) break;
-    }
-
-    lastRewritten = current;
-    window._ats = { lastOriginal, lastRewritten };
-    setRewriteStatus(`Done in ${i} pass${i === 1 ? '' : 'es'} (target ${TARGET}).`);
+    const score = Math.round(Number(data?.final_score ?? 0));
+    renderCompactScore(el.rewriteScoreBox, { match_score: score });
+    setRewriteStatus('Done (single pass).');
     if (el.diffHint) el.diffHint.textContent = 'Green = added, red = removed.';
   } catch (err) {
     console.error(err);
@@ -115,13 +94,8 @@ el.showDiffBtn.addEventListener('click', () => {
   if (!base || !revised) return setStatus('No baseline to compare.');
 
   if (el.diffBox.classList.contains('hidden')) {
-    try {
-      const html = renderDiffHtml(base, revised);
-      el.diffBox.innerHTML = html && html.trim() ? html : escapeHtml(revised);
-    } catch (e) {
-      console.warn('diff render failed; showing plain text', e);
-      el.diffBox.textContent = revised;
-    }
+    const html = renderDiffHtml(base, revised); // uses <ins> and <del>
+    el.diffBox.innerHTML = html;
     el.diffBox.classList.remove('hidden');
     el.diffBox.style.display = 'block';
     el.showDiffBtn.textContent = 'Hide changes';
@@ -149,7 +123,7 @@ el.downloadBtn.addEventListener('click', () => {
   downloadText('rewritten-resume.txt', text);
 });
 
-/* ---------- Shared helpers ---------- */
+/* ---------- HTTP helper ---------- */
 async function callFn(action, payload) {
   const res = await fetch('/.netlify/functions/tailor', {
     method: 'POST',
@@ -159,6 +133,8 @@ async function callFn(action, payload) {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   try { return await res.json(); } catch { return {}; }
 }
+
+/* ---------- UI helpers ---------- */
 function renderCompactScore(target, data) {
   const score = Math.round(Number(data?.match_score ?? 0));
   target.innerHTML = `<span class="font-medium">New match score:</span> <span class="font-semibold">${score}</span>/100`;
@@ -168,32 +144,66 @@ function setRewriteStatus(m) { el.rewriteStatus.textContent = m || ''; }
 function stripHtml(s) { const d = document.createElement('div'); d.innerHTML = s || ''; return d.innerText; }
 function escapeHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-/* ---------- Diff utilities ---------- */
-function ensureDmp() {
-  return (typeof diff_match_patch === 'function') ? new diff_match_patch() : null;
+/* ---------- Built-in word diff (no external libs) ---------- */
+// Tokenize by words + whitespace to keep spacing intact
+function tokenize(str) {
+  const tokens = [];
+  const regex = /(\s+|[^\s]+)/g;
+  let m;
+  while ((m = regex.exec(str)) !== null) tokens.push(m[0]);
+  return tokens;
 }
-function renderInlineBoldAdds(original, rewritten) {
-  const dmp = ensureDmp();
-  if (!dmp) return escapeHtml(String(rewritten ?? ''));
-  const diffs = dmp.diff_main(String(original ?? ''), String(rewritten ?? ''));
-  dmp.diff_cleanupSemantic(diffs);
-  let out = '';
-  for (const [op, text] of diffs) {
-    if (op === 1) out += '<strong>' + escapeHtml(text) + '</strong>';
-    else if (op === 0) out += escapeHtml(text);
+// LCS to find unchanged tokens
+function lcs(a, b) {
+  const n = a.length, m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
   }
-  return out || escapeHtml(String(rewritten ?? ''));
+  const seq = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { seq.push(a[i]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
+    else j++;
+  }
+  return seq;
 }
 function renderDiffHtml(original, rewritten) {
-  const dmp = ensureDmp();
-  if (!dmp) return escapeHtml(String(rewritten ?? ''));
-  const diffs = dmp.diff_main(String(original ?? ''), String(rewritten ?? ''));
-  dmp.diff_cleanupSemantic(diffs);
-  let out = '';
-  for (const [op, text] of diffs) {
-    if (op === -1) out += '<del>' + escapeHtml(text) + '</del>';
-    else if (op === 1) out += '<ins>' + escapeHtml(text) + '</ins>';
-    else out += '<span>' + escapeHtml(text) + '</span>';
+  const a = tokenize(original), b = tokenize(rewritten);
+  const common = lcs(a, b);
+  let i = 0, j = 0, k = 0, out = '';
+  while (i < a.length || j < b.length) {
+    const nextCommon = common[k];
+    // deletions from a until nextCommon
+    let delBuf = '';
+    while (i < a.length && a[i] !== nextCommon) { delBuf += a[i++]; }
+    if (delBuf) out += `<del>${escapeHtml(delBuf)}</del>`;
+    // additions from b until nextCommon
+    let addBuf = '';
+    while (j < b.length && b[j] !== nextCommon) { addBuf += b[j++]; }
+    if (addBuf) out += `<ins>${escapeHtml(addBuf)}</ins>`;
+    // unchanged token
+    if (k < common.length) { out += escapeHtml(common[k]); i++; j++; k++; }
   }
-  return out || escapeHtml(String(rewritten ?? ''));
+  return out || escapeHtml(rewritten);
+}
+// For the live rewritten preview: make additions bold
+function renderInlineBoldAdds(original, rewritten) {
+  const a = tokenize(original), b = tokenize(rewritten);
+  const common = lcs(a, b);
+  let i = 0, j = 0, k = 0, out = '';
+  while (i < a.length || j < b.length) {
+    const nextCommon = common[k];
+    // skip deletions
+    while (i < a.length && a[i] !== nextCommon) { i++; }
+    // additions get bold
+    let addBuf = '';
+    while (j < b.length && b[j] !== nextCommon) { addBuf += b[j++]; }
+    if (addBuf) out += `<strong>${escapeHtml(addBuf)}</strong>`;
+    if (k < common.length) { out += escapeHtml(common[k]); i++; j++; k++; }
+  }
+  return out || escapeHtml(rewritten);
 }
