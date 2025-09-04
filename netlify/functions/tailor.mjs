@@ -87,7 +87,7 @@ async function analyzeResume(resume, jd) {
     '• 20%: alignment of responsibilities/scope and seniority.',
     '• 10%: outcomes/metrics.',
     'Never credit skills clearly absent. If critical must-haves are missing, explain via capped_reason.',
-    'Output JSON only: { "match_score": number, "missing_required": string[], "missing_nice": string[], "bullet_suggestions": string[], "flags": string[], "capped_reason": string|null }'
+    'Output json only: { "match_score": number, "missing_required": string[], "missing_nice": string[], "bullet_suggestions": string[], "flags": string[], "capped_reason": string|null }'
   ].join(' ');
 
   const user = JSON.stringify({ resume, jd });
@@ -124,7 +124,7 @@ async function rewriteResume(resume, jd, mode, baseline) {
     '2) You MAY rephrase to emphasize measurable outcomes.',
     '3) You MAY add a Skills section and reorder content.',
     '4) Include JD-relevant keywords ONLY if plausibly supported by the original resume.',
-    'Output JSON: { "rewritten_resume": string, "suggestions": string[] }.'
+    'Output json: { "rewritten_resume": string, "suggestions": string[] }.'
   ].join(' ');
 
   const user = JSON.stringify({
