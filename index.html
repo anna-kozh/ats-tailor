@@ -1,108 +1,76 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ATS Tailor</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ATS Rewrite to 95%</title>
   <style>
-    .card{background:#fff;border-radius:16px;box-shadow:0 1px 4px rgba(0,0,0,.06);padding:20px}
-    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono','Courier New', monospace}
-    #diffBox ins { background:#e6ffed; text-decoration:none; }
-    #diffBox del { background:#ffeef0; text-decoration:none; }
-    #diffBox span { background:transparent; }
-    .kw-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:#fff4e5; border:1px solid #f2c97d; margin:4px; font-size:12px; }
-    .kw-chip button { font-size:12px; line-height:12px; }
-    .kw-inline { background:linear-gradient(to top, #fff4e5 60%, transparent 60%); }
+    :root {
+      --bg:#0b0c10; --card:#15171c; --ink:#e8eaed; --muted:#9aa0a6; --accent:#7aa6ff; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+    }
+    *{box-sizing:border-box}
+    body{margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background:var(--bg); color:var(--ink);}
+    header{padding:20px 16px; display:flex; gap:12px; align-items:center; border-bottom:1px solid #262a33}
+    header h1{font-size:18px; margin:0}
+    main{max-width:1100px; margin:0 auto; padding:16px; display:grid; grid-template-columns:1fr; gap:16px}
+    @media(min-width:1000px){ main{grid-template-columns:1fr 1fr} }
+    .card{background:var(--card); border:1px solid #262a33; border-radius:16px; padding:14px; box-shadow:0 1px 8px rgba(0,0,0,.35)}
+    textarea{width:100%; min-height:280px; background:#0f1115; color:var(--ink); border:1px solid #2b2f38; border-radius:12px; padding:12px; resize:vertical; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace}
+    label{display:block; font-weight:600; margin-bottom:8px}
+    .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+    button{border:0; background:var(--accent); color:#0b0c10; padding:12px 16px; border-radius:12px; font-weight:700; cursor:pointer}
+    button[disabled]{opacity:.5; cursor:wait}
+    .small{font-size:12px; color:var(--muted)}
+    .scores{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+    .pill{padding:6px 10px; border-radius:999px; font-weight:700; font-size:12px; border:1px solid #2b2f38}
+    .pill.ok{background:rgba(34,197,94,.12); color:#86efac; border-color:rgba(34,197,94,.35)}
+    .pill.warn{background:rgba(245,158,11,.12); color:#fde68a; border-color:rgba(245,158,11,.35)}
+    .pill.bad{background:rgba(239,68,68,.12); color:#fecaca; border-color:rgba(239,68,68,.35)}
+    .out{white-space:pre-wrap; background:#0f1115; padding:12px; border-radius:12px; border:1px solid #2b2f38; min-height:280px}
+    .muted{color:var(--muted)}
+    .spinner{display:inline-block; width:16px; height:16px; border:2px solid #ffffff40; border-top-color:#fff; border-radius:50%; animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .section-title{font-weight:700; margin:8px 0 4px 0; font-size:13px; color:#b6c3ff}
+    .json{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size:12px; background:#0b0c10; padding:10px; border-radius:12px; border:1px solid #273042}
   </style>
 </head>
-<body class="bg-gray-50 text-gray-900">
-  <div class="max-w-7xl mx-auto p-6 space-y-6">
-    <header class="flex items-center justify-between">
-      <h1 class="text-2xl font-bold">ATS Resume Tailor</h1>
-      <span class="text-xs text-gray-600">Private: your key stays on Netlify</span>
-    </header>
+<body>
+  <header>
+    <h1>ATS Rewrite → 95%</h1>
+    <div class="small">Paste resume and JD. One click. Deterministic scoring.</div>
+  </header>
 
-    <!-- Step 1: Inputs -->
-    <section class="grid grid-cols-1 lg:grid-cols-3 gap-5">
-      <div class="card space-y-3">
-        <h2 class="font-semibold">Resume v1</h2>
-        <input id="resumeFile" type="file" accept=".docx,.txt" class="block w-full text-sm">
-        <textarea id="resumeText" class="w-full h-64 p-3 border rounded-lg" placeholder="Paste resume text"></textarea>
-        <p class="text-xs text-gray-500">Tip: .docx parses best.</p>
-      </div>
-
-      <div class="card space-y-3">
-        <h2 class="font-semibold">Job Description</h2>
-        <input id="jdFile" type="file" accept=".docx,.txt" class="block w-full text-sm">
-        <textarea id="jdText" class="w-full h-64 p-3 border rounded-lg" placeholder="Paste the JD here"></textarea>
-      </div>
-
-      <div class="card space-y-4">
-        <h2 class="font-semibold">Step 2 — Analyse</h2>
-        <div class="flex items-center gap-3">
-          <button id="analyzeBtn" class="px-3 py-2 rounded-lg bg-black text-white text-sm">Analyse</button>
-          <div id="status" class="text-sm text-gray-600"></div>
-        </div>
-        <div id="scoreBox" class="text-sm"></div>
-      </div>
+  <main>
+    <section class="card">
+      <label for="resume">Resume v1 (paste plain text)</label>
+      <textarea id="resume" placeholder="Paste your resume text..."></textarea>
+      <div class="small">Tip: keep it under ~1200 words for best results.</div>
     </section>
 
-    <!-- Step 3: Rewrite to v2 -->
-    <section class="card space-y-3">
-      <div class="flex items-center justify-between">
-        <h2 class="font-semibold">Step 3 — Rewrite to v2</h2>
-        <button id="rewriteBtn" class="px-3 py-2 rounded-lg border">Rewrite</button>
-      </div>
-
-      <div class="flex items-center justify-between mb-2">
-        <div id="rewriteStatus" class="text-sm text-gray-600"></div>
-        <div id="rewriteScoreBox" class="text-sm font-medium text-green-700"></div>
-      </div>
-
-      <div id="rewritten"
-           class="w-full h-72 p-3 border rounded-lg mono whitespace-pre-wrap overflow-auto bg-white"
-           contenteditable="false" aria-label="Rewritten resume v2"></div>
-
-      <div class="mt-2">
-        <h3 class="font-semibold text-sm">If you add these skills, you get to <span id="targetPct">95–97%</span></h3>
-        <div id="chips" class="mt-1"></div>
-        <button id="approveBtn" class="mt-2 px-3 py-2 rounded-lg bg-black text-white text-sm">Approve</button>
-      </div>
-
-      <div class="mt-4 flex items-center gap-3">
-        <button id="showDiffBtn" class="px-3 py-2 rounded-lg border text-sm">Show changes</button>
-        <span id="diffHint" class="text-xs text-gray-500">Green = added, red = removed.</span>
-      </div>
-      <div id="diffBox" class="mt-3 p-3 border rounded-lg mono whitespace-pre-wrap text-sm hidden"></div>
+    <section class="card">
+      <label for="jd">Job Description</label>
+      <textarea id="jd" placeholder="Paste the full JD..."></textarea>
     </section>
 
-    <!-- Step 4: Final v3 -->
-    <section class="card space-y-3">
-      <div class="flex items-center justify-between">
-        <h2 class="font-semibold">Step 4 — Final v3</h2>
-        <div id="finalScoreBox" class="text-sm font-medium text-green-700"></div>
+    <section class="card" style="grid-column:1/-1">
+      <div class="row">
+        <button id="rewriteBtn">Rewrite to 95%</button>
+        <div id="status" class="small muted"></div>
       </div>
-      <div id="finalStatus" class="text-sm text-gray-600"></div>
-      <div id="final"
-           class="w-full h-72 p-3 border rounded-lg mono whitespace-pre-wrap overflow-auto bg-white"
-           contenteditable="false" aria-label="Final resume v3"></div>
-      <div class="mt-2">
-        <h3 class="font-semibold text-sm">Still under 95%? Consider adding:</h3>
-        <div id="chipsFinal" class="mt-1"></div>
+      <div style="height:8px"></div>
+      <div class="scores">
+        <div id="scoreV1" class="pill bad">v1: —</div>
+        <div id="scoreV2" class="pill bad">v2: —</div>
       </div>
-      <div class="mt-3 flex gap-3">
-        <button id="copyBtn" class="px-3 py-2 rounded-lg border text-sm">Copy v3</button>
-        <button id="downloadBtn" class="px-3 py-2 rounded-lg border text-sm">Download v3 .txt</button>
-      </div>
+      <div style="height:12px"></div>
+      <div class="section-title">Rewritten Resume v2</div>
+      <div id="v2" class="out muted">—</div>
+      <div style="height:12px"></div>
+      <div class="section-title">Why this score (debug)</div>
+      <pre id="debug" class="json muted">—</pre>
     </section>
+  </main>
 
-    <footer class="text-xs text-gray-500 py-6">
-      Serverless call: <code>/.netlify/functions/tailor</code>. No data stored.
-    </footer>
-  </div>
-
-  <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
-  <script type="module" src="./js/main.js?v=30"></script>
+  <script src="./js/main.js"></script>
 </body>
 </html>

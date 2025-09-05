@@ -1,203 +1,65 @@
-// js/main.js
-import { readDocxAsText, readTextFile, downloadText } from './utils.js';
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const rewriteBtn = $("rewriteBtn");
+  const status = $("status");
+  const scoreV1 = $("scoreV1");
+  const scoreV2 = $("scoreV2");
+  const v2Out = $("v2");
+  const debug = $("debug");
+  const resumeEl = $("resume");
+  const jdEl = $("jd");
 
-const el = {
-  resumeFile: document.getElementById('resumeFile'),
-  jdFile: document.getElementById('jdFile'),
-  resumeText: document.getElementById('resumeText'),
-  jdText: document.getElementById('jdText'),
-  analyzeBtn: document.getElementById('analyzeBtn'),
-  rewriteBtn: document.getElementById('rewriteBtn'),
-  status: document.getElementById('status'),
-  scoreBox: document.getElementById('scoreBox'),
-  rewritten: document.getElementById('rewritten'),
-  rewriteStatus: document.getElementById('rewriteStatus'),
-  rewriteScoreBox: document.getElementById('rewriteScoreBox'),
-  chips: document.getElementById('chips'),
-  approveBtn: document.getElementById('approveBtn'),
-  final: document.getElementById('final'),
-  finalScoreBox: document.getElementById('finalScoreBox'),
-  finalStatus: document.getElementById('finalStatus'),
-  chipsFinal: document.getElementById('chipsFinal'),
-  showDiffBtn: document.getElementById('showDiffBtn'),
-  diffBox: document.getElementById('diffBox'),
-  diffHint: document.getElementById('diffHint'),
-  copyBtn: document.getElementById('copyBtn'),
-  downloadBtn: document.getElementById('downloadBtn')
-};
-
-let v1 = '';       // original resume
-let v2 = '';       // rewritten v2
-let v3 = '';       // final v3
-let missingV2 = []; // missing keywords after v2
-
-/* ---------- File uploads ---------- */
-el.resumeFile?.addEventListener('change', async (e) => {
-  const f = e.target.files?.[0]; if (!f) return;
-  el.resumeText.value = await readAnyText(f);
-});
-el.jdFile?.addEventListener('change', async (e) => {
-  const f = e.target.files?.[0]; if (!f) return;
-  el.jdText.value = await readAnyText(f);
-});
-async function readAnyText(file) {
-  if (file.name.endsWith('.docx')) return await readDocxAsText(file);
-  return await readTextFile(file);
-}
-
-/* ---------- Analyze (Step 2) ---------- */
-el.analyzeBtn.addEventListener('click', async () => {
-  const resume = el.resumeText.value.trim();
-  const jd = el.jdText.value.trim();
-  if (!resume || !jd) return setStatus('Add both resume + JD.');
-
-  setStatus('Analyzing…');
-  el.scoreBox.innerHTML = '';
-  try {
-    const data = await callFn('analyze', { resume, jd });
-    renderScore(el.scoreBox, data?.match_score);
-    setStatus('');
-  } catch (err) {
-    setStatus('Error: ' + (err.message || 'unknown'));
+  function setScorePill(el, label, score){
+    el.textContent = `${label}: ${score === null ? "—" : Math.round(score)}`;
+    el.classList.remove("ok","warn","bad");
+    if (score === null) { el.classList.add("bad"); return; }
+    if (score >= 95) el.classList.add("ok");
+    else if (score >= 75) el.classList.add("warn");
+    else el.classList.add("bad");
   }
-});
 
-/* ---------- Rewrite to v2 (Step 3) ---------- */
-el.rewriteBtn.addEventListener('click', async () => {
-  const resume = el.resumeText.value.trim();
-  const jd = el.jdText.value.trim();
-  if (!resume || !jd) return setRewriteStatus('Add both resume + JD.');
+  async function rewrite(){
+    const resumeV1 = resumeEl.value.trim();
+    const jd = jdEl.value.trim();
+    // Clear previous state
+    setScorePill(scoreV1, "v1", null);
+    setScorePill(scoreV2, "v2", null);
+    v2Out.textContent = "—";
+    v2Out.classList.add("muted");
+    debug.textContent = "—";
+    debug.classList.add("muted");
 
-  v1 = resume;
-  v2 = '';
-  v3 = '';
-  el.rewritten.textContent = '';
-  el.final.textContent = '';
-  el.rewriteScoreBox.textContent = '';
-  el.finalScoreBox.textContent = '';
-  el.chips.innerHTML = '';
-  el.chipsFinal.innerHTML = '';
-  hideDiff();
-
-  setRewriteStatus('Rewriting…');
-  try {
-    const data = await callFn('rewrite', { resume, jd });
-    v2 = String(data?.rewritten_resume || resume);
-    missingV2 = Array.isArray(data?.missing_keywords) ? data.missing_keywords : [];
-    el.rewritten.textContent = v2;
-    renderScore(el.rewriteScoreBox, data?.final_score);
-
-    // Build chips
-    el.chips.innerHTML = '';
-    for (const kw of missingV2) addChip(kw, el.chips);
-
-    setRewriteStatus('');
-  } catch (err) {
-    setRewriteStatus('Error: ' + (err.message || 'unknown'));
+    if(!resumeV1 || !jd){
+      status.textContent = "Paste both resume and JD.";
+      return;
+    }
+    try {
+      rewriteBtn.disabled = true;
+      status.innerHTML = `<span class="spinner"></span> Rewriting…`;
+      const res = await fetch("/.netlify/functions/rewrite", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ resumeV1, jd })
+      });
+      if(!res.ok){
+        const txt = await res.text();
+        throw new Error(`HTTP ${res.status}: ${txt}`);
+      }
+      const data = await res.json();
+      setScorePill(scoreV1, "v1", data.scoreV1);
+      setScorePill(scoreV2, "v2", data.scoreV2);
+      v2Out.textContent = data.resumeV2 || "—";
+      v2Out.classList.toggle("muted", !data.resumeV2);
+      debug.textContent = JSON.stringify(data.details, null, 2);
+      debug.classList.remove("muted");
+      status.textContent = data.scoreV2 >= 95 ? "Done." : "Reached max passes; tweak v1 for better fit.";
+    } catch (err){
+      console.error(err);
+      status.textContent = err.message || "Error. See console.";
+    } finally {
+      rewriteBtn.disabled = false;
+    }
   }
-});
 
-/* ---------- Approve (Step 4) ---------- */
-el.approveBtn.addEventListener('click', async () => {
-  if (!v2) return setFinalStatus('Rewrite first.');
-  const jd = el.jdText.value.trim();
-  const approved = currentChips(el.chips);
-  setFinalStatus('Improving to v3…');
-  el.final.textContent = '';
-
-  try {
-    const data = await callFn('approve', { resume_v2: v2, jd, approved_keywords: approved });
-    v3 = String(data?.final_resume || v2);
-    el.final.textContent = v3;
-    renderScore(el.finalScoreBox, data?.final_score);
-    el.chipsFinal.innerHTML = '';
-    for (const kw of (data?.missing_keywords_after || [])) addChip(kw, el.chipsFinal);
-
-    // Update diff to compare v1 and v3
-    if (el.diffHint) el.diffHint.textContent = 'Green = added, red = removed.';
-  } catch (err) {
-    setFinalStatus('Error: ' + (err.message || 'unknown'));
-  }
-});
-
-/* ---------- Show / hide changes (v1 vs latest) ---------- */
-el.showDiffBtn?.addEventListener('click', () => {
-  const base = v1 || el.resumeText.value.trim();
-  const revised = v3 || v2 || '';
-  if (!base || !revised) return setStatus('No baseline to compare.');
-
-  if (el.diffBox.classList.contains('hidden')) {
-    el.diffBox.innerHTML = renderDiffHtml(base, revised);
-    el.diffBox.classList.remove('hidden');
-    el.diffBox.style.display = 'block';
-    el.showDiffBtn.textContent = 'Hide changes';
-  } else {
-    hideDiff();
-  }
-});
-function hideDiff() {
-  el.diffBox.classList.add('hidden');
-  el.diffBox.innerHTML = '';
-  el.diffBox.style.display = '';
-  if (el.showDiffBtn) el.showDiffBtn.textContent = 'Show changes';
-}
-
-/* ---------- Copy / Download ---------- */
-el.copyBtn?.addEventListener('click', async () => {
-  const text = el.final.innerText || '';
-  if (!text.trim()) return setFinalStatus('Nothing to copy.');
-  try { await navigator.clipboard.writeText(text); setFinalStatus('Copied.'); }
-  catch { setFinalStatus('Copy failed.'); }
-});
-el.downloadBtn?.addEventListener('click', () => {
-  const text = el.final.innerText || '';
-  if (!text.trim()) return setFinalStatus('Nothing to download.');
-  downloadText('resume-v3.txt', text);
-});
-
-/* ---------- Helpers ---------- */
-async function callFn(action, payload) {
-  const res = await fetch('/.netlify/functions/tailor', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, ...payload })
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  try { return await res.json(); } catch { return {}; }
-}
-function renderScore(target, score) {
-  const s = Math.round(Number(score ?? 0));
-  target.innerHTML = `<span class="font-medium">Score:</span> <span class="font-semibold">${s}</span>/100`;
-}
-function setStatus(m) { el.status.textContent = m || ''; }
-function setRewriteStatus(m) { el.rewriteStatus.textContent = m || ''; }
-function setFinalStatus(m) { el.finalStatus.textContent = m || ''; }
-
-function addChip(text, container) {
-  const chip = document.createElement('span');
-  chip.className = 'kw-chip';
-  chip.dataset.kw = text;
-  chip.innerHTML = `<span>${escapeHtml(text)}</span><button aria-label="remove">×</button>`;
-  chip.querySelector('button').addEventListener('click', () => chip.remove());
-  container.appendChild(chip);
-}
-function currentChips(container) {
-  return Array.from(container.querySelectorAll('[data-kw]')).map(el => el.dataset.kw);
-}
-
-function tokenize(str){ const out=[]; const re=/(\s+|[^\s]+)/g; let m; while((m=re.exec(str))!==null) out.push(m[0]); return out; }
-function lcs(a,b){ const n=a.length,m=b.length; const dp=Array.from({length:n+1},()=>Array(m+1).fill(0)); for(let i=n-1;i>=0;i--){ for(let j=m-1;j>=0;j--){ dp[i][j]=a[i]===b[j]?dp[i+1][j+1]+1:Math.max(dp[i+1][j],dp[i][j+1]); } } const seq=[]; let i=0,j=0; while(i<n&&j<m){ if(a[i]===b[j]){ seq.push(a[i]); i++; j++; } else if(dp[i+1][j]>=dp[i][j+1]) i++; else j++; } return seq; }
-function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function renderDiffHtml(original, rewritten){
-  const a=tokenize(original), b=tokenize(rewritten), common=lcs(a,b);
-  let i=0,j=0,k=0,out='';
-  while(i<a.length||j<b.length){
-    const next=common[k];
-    let delBuf=''; while(i<a.length&&a[i]!==next){ delBuf+=a[i++]; }
-    if(delBuf) out+=`<del>${escapeHtml(delBuf)}</del>`;
-    let addBuf=''; while(j<b.length&&b[j]!==next){ addBuf+=b[j++]; }
-    if(addBuf) out+=`<ins>${escapeHtml(addBuf)}</ins>`;
-    if(k<common.length){ out+=escapeHtml(common[k]); i++; j++; k++; }
-  }
-  return out || escapeHtml(rewritten);
-}
+  rewriteBtn.addEventListener("click", rewrite);
+})();

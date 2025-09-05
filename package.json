@@ -1,0 +1,9 @@
+{
+  "name": "ats-sim-app",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "start": "netlify dev",
+    "build": "echo 'No build step'"
+  }
+}
