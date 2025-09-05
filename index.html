@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Resume Optimizer</title>
+    <title>AI Resume Optimizer & Scorer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,92 +11,130 @@
     <style>
         body { font-family: 'Inter', sans-serif; }
         ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: #1f2937; } /* gray-800 */
-        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; } /* gray-600 */
-        ::-webkit-scrollbar-thumb:hover { background: #6b7280; } /* gray-500 */
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
         .ai-output-container pre { white-space: pre-wrap; word-wrap: break-word; }
         #loader svg { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .score-gauge {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            background-color: #374151; /* gray-700 */
+            transition: background 1s ease-in-out;
+        }
+        .score-gauge-inner {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: #1f2937; /* gray-800 */
+            display: grid;
+            place-items: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-200 min-h-screen flex items-center justify-center p-4">
-    <div class="w-full max-w-6xl mx-auto bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8">
+<body class="bg-gray-900 text-gray-200 min-h-screen flex flex-col items-center justify-center p-4">
 
+    <div class="w-full max-w-7xl mx-auto">
         <!-- Header -->
         <div class="text-center mb-8">
-            <h1 class="text-3xl md:text-4xl font-bold text-white">AI Resume Optimizer</h1>
-            <p class="text-gray-400 mt-2">Tailor your resume to any job description in seconds.</p>
+            <h1 class="text-3xl md:text-4xl font-bold text-white">AI Resume Optimizer & Scorer</h1>
+            <p class="text-gray-400 mt-2">Get a data-driven score on how well your resume matches a job.</p>
         </div>
 
-        <!-- Main Content Grid -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <!-- Left Column: Inputs -->
-            <div class="flex flex-col gap-6">
-                <div>
-                    <label for="resume-input" class="block text-sm font-medium text-gray-300 mb-2">Your Current Resume</label>
-                    <textarea id="resume-input" rows="18" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 text-sm text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow duration-200" placeholder="Paste your entire resume here..."></textarea>
-                </div>
-                <div>
-                    <label for="job-desc-input" class="block text-sm font-medium text-gray-300 mb-2">Job Description</label>
-                    <textarea id="job-desc-input" rows="18" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 text-sm text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow duration-200" placeholder="Paste the job description you are targeting..."></textarea>
-                </div>
-            </div>
-
-            <!-- Right Column: Output -->
-            <div class="flex flex-col">
-                <div class="flex justify-between items-center mb-2">
-                    <label for="output-container" class="block text-sm font-medium text-gray-300">Optimized Resume</label>
-                    <button id="copy-btn" class="text-sm bg-gray-600 hover:bg-gray-500 text-white font-semibold py-1 px-3 rounded-md transition-colors duration-200 hidden">
-                        Copy
-                    </button>
-                </div>
-                <div id="output-container" class="w-full h-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-sm ai-output-container overflow-y-auto">
-                    <div id="placeholder" class="text-gray-500 h-full flex items-center justify-center">
-                        Your tailored resume will appear here...
+        <!-- Scoreboard Section -->
+        <div id="scoreboard" class="hidden mb-6 bg-gray-800 rounded-2xl p-6">
+            <h2 class="text-2xl font-bold text-center mb-4 text-white">Alignment Analysis</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+                <!-- Original Score -->
+                <div class="text-center flex flex-col items-center">
+                    <h3 class="text-lg font-semibold text-gray-300 mb-2">Original Score</h3>
+                    <div id="original-score-gauge" class="score-gauge">
+                        <div id="original-score-text" class="score-gauge-inner">0%</div>
                     </div>
-                     <div id="loader" class="hidden h-full flex flex-col items-center justify-center text-center">
-                        <svg class="h-8 w-8 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        <p class="mt-4 text-gray-400">Optimizing... this may take a moment.</p>
+                </div>
+                <!-- Keywords -->
+                <div class="text-center">
+                    <h3 class="text-lg font-semibold text-gray-300 mb-2">Keywords Analyzed</h3>
+                    <div id="keywords-list" class="flex flex-wrap justify-center gap-2 p-2 bg-gray-900 rounded-lg max-h-32 overflow-y-auto">
+                        <!-- Keywords will be injected here -->
                     </div>
-                    <pre id="result" class="text-gray-200"></pre>
+                </div>
+                <!-- Optimized Score -->
+                <div class="text-center flex flex-col items-center">
+                    <h3 class="text-lg font-semibold text-gray-300 mb-2">Optimized Score</h3>
+                    <div id="optimized-score-gauge" class="score-gauge">
+                        <div id="optimized-score-text" class="score-gauge-inner">0%</div>
+                    </div>
                 </div>
             </div>
         </div>
-        
-        <!-- Action Button -->
-        <div class="mt-6 text-center">
-            <button id="generate-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-lg transition-transform transform hover:scale-105 duration-200 shadow-lg">
-                Optimize My Resume
-            </button>
-        </div>
-        
-        <!-- Error Message Box -->
-        <div id="error-box" class="hidden mt-4 bg-red-900 border border-red-700 text-red-200 px-4 py-3 rounded-lg relative" role="alert">
-            <strong class="font-bold">Error:</strong>
-            <span id="error-message" class="block sm:inline"></span>
+
+        <!-- Main Content -->
+        <div class="w-full bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Inputs -->
+                <div class="flex flex-col gap-6">
+                    <div>
+                        <label for="resume-input" class="block text-sm font-medium text-gray-300 mb-2">1. Your Current Resume</label>
+                        <textarea id="resume-input" rows="18" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 text-sm text-gray-200 focus:ring-2 focus:ring-blue-500" placeholder="Paste your entire resume here..."></textarea>
+                    </div>
+                    <div>
+                        <label for="job-desc-input" class="block text-sm font-medium text-gray-300 mb-2">2. The Job Description</label>
+                        <textarea id="job-desc-input" rows="18" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 text-sm text-gray-200 focus:ring-2 focus:ring-blue-500" placeholder="Paste the job description you are targeting..."></textarea>
+                    </div>
+                </div>
+                <!-- Output -->
+                <div class="flex flex-col">
+                    <div class="flex justify-between items-center mb-2">
+                        <label class="block text-sm font-medium text-gray-300">3. Optimized Resume</label>
+                        <button id="copy-btn" class="text-sm bg-gray-600 hover:bg-gray-500 text-white font-semibold py-1 px-3 rounded-md hidden">Copy</button>
+                    </div>
+                    <div class="w-full h-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-sm ai-output-container overflow-y-auto">
+                        <div id="placeholder" class="text-gray-500 h-full flex items-center justify-center">Your tailored resume will appear here...</div>
+                        <div id="loader" class="hidden h-full flex flex-col items-center justify-center text-center">
+                            <svg class="h-8 w-8 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            <p class="mt-4 text-gray-400">Analyzing & Optimizing... this may take a moment.</p>
+                        </div>
+                        <pre id="result" class="text-gray-200"></pre>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-6 text-center">
+                <button id="generate-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-lg transform hover:scale-105 shadow-lg">Analyze & Optimize</button>
+            </div>
+            <div id="error-box" class="hidden mt-4 bg-red-900 border border-red-700 text-red-200 px-4 py-3 rounded-lg" role="alert">
+                <strong class="font-bold">Error:</strong>
+                <span id="error-message" class="block sm:inline"></span>
+            </div>
         </div>
     </div>
 
     <script>
-        const resumeInput = document.getElementById('resume-input');
-        const jobDescInput = document.getElementById('job-desc-input');
         const generateBtn = document.getElementById('generate-btn');
-        const placeholder = document.getElementById('placeholder');
         const loader = document.getElementById('loader');
         const resultPre = document.getElementById('result');
         const copyBtn = document.getElementById('copy-btn');
         const errorBox = document.getElementById('error-box');
         const errorMessage = document.getElementById('error-message');
+        const scoreboard = document.getElementById('scoreboard');
+        const originalScoreGauge = document.getElementById('original-score-gauge');
+        const originalScoreText = document.getElementById('original-score-text');
+        const optimizedScoreGauge = document.getElementById('optimized-score-gauge');
+        const optimizedScoreText = document.getElementById('optimized-score-text');
+        const keywordsList = document.getElementById('keywords-list');
 
-        generateBtn.addEventListener('click', optimizeResume);
+        generateBtn.addEventListener('click', analyzeAndOptimize);
         copyBtn.addEventListener('click', copyToClipboard);
 
-        async function optimizeResume() {
-            const resumeText = resumeInput.value.trim();
-            const jobDescription = jobDescInput.value.trim();
+        async function analyzeAndOptimize() {
+            const resumeText = document.getElementById('resume-input').value.trim();
+            const jobDescription = document.getElementById('job-desc-input').value.trim();
 
             if (!resumeText || !jobDescription) {
                 showError("Please paste your resume and the job description.");
@@ -107,7 +145,6 @@
             setLoadingState(true);
 
             try {
-                // Call our own secure serverless function
                 const response = await fetch('/.netlify/functions/optimize', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -120,49 +157,73 @@
                     throw new Error(data.error || 'The optimization request failed.');
                 }
                 
-                const optimizedResume = data.choices[0].message.content;
-
-                resultPre.textContent = optimizedResume;
+                resultPre.textContent = data.optimizedResume;
                 copyBtn.classList.remove('hidden');
+                scoreboard.classList.remove('hidden');
+                
+                updateScoreGauge(originalScoreGauge, originalScoreText, data.originalScore);
+                updateScoreGauge(optimizedScoreGauge, optimizedScoreText, data.optimizedScore);
+                renderKeywords(data.keywords);
 
             } catch (error) {
                 console.error("Error:", error);
                 showError(error.message);
-                placeholder.classList.remove('hidden');
+                document.getElementById('placeholder').classList.remove('hidden');
             } finally {
                 setLoadingState(false);
             }
         }
+        
+        function updateScoreGauge(gaugeElement, textElement, score) {
+            let currentScore = 0;
+            const targetScore = Math.round(score);
+            
+            const interval = setInterval(() => {
+                currentScore++;
+                const color = getScoreColor(currentScore);
+                gaugeElement.style.background = `conic-gradient(${color} ${currentScore * 3.6}deg, #374151 ${currentScore * 3.6}deg)`;
+                textElement.textContent = `${currentScore}%`;
+                if (currentScore >= targetScore) {
+                    clearInterval(interval);
+                }
+            }, 20);
+        }
+
+        function getScoreColor(score) {
+            if (score < 50) return '#ef4444'; // red-500
+            if (score < 75) return '#f59e0b'; // amber-500
+            return '#22c55e'; // green-500
+        }
+
+        function renderKeywords(keywords) {
+            keywordsList.innerHTML = keywords.map(kw => `<span class="bg-gray-700 text-gray-300 text-xs font-medium px-2.5 py-1 rounded-full">${kw}</span>`).join('');
+        }
 
         function setLoadingState(isLoading) {
+            const placeholder = document.getElementById('placeholder');
             if (isLoading) {
+                scoreboard.classList.add('hidden');
                 placeholder.classList.add('hidden');
                 resultPre.textContent = '';
                 loader.classList.remove('hidden');
                 copyBtn.classList.add('hidden');
                 generateBtn.disabled = true;
-                generateBtn.textContent = 'Generating...';
-                generateBtn.classList.remove('hover:scale-105', 'bg-blue-600', 'hover:bg-blue-700');
+                generateBtn.textContent = 'Processing...';
                 generateBtn.classList.add('bg-gray-600', 'cursor-not-allowed');
+                generateBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
             } else {
                 loader.classList.add('hidden');
                 generateBtn.disabled = false;
-                generateBtn.textContent = 'Optimize My Resume';
-                generateBtn.classList.add('hover:scale-105', 'bg-blue-600', 'hover:bg-blue-700');
+                generateBtn.textContent = 'Analyze & Optimize';
                 generateBtn.classList.remove('bg-gray-600', 'cursor-not-allowed');
+                generateBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
             }
         }
 
         function copyToClipboard() {
-            const textToCopy = resultPre.textContent;
-            if (!textToCopy) return;
-            
-            navigator.clipboard.writeText(textToCopy).then(() => {
+            navigator.clipboard.writeText(resultPre.textContent).then(() => {
                 copyBtn.textContent = 'Copied!';
                 setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
-            }).catch(err => {
-                console.error('Failed to copy text: ', err);
-                showError('Could not copy text to clipboard.');
             });
         }
 
@@ -177,3 +238,4 @@
     </script>
 </body>
 </html>
+
