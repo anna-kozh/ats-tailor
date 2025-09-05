@@ -1,4 +1,6 @@
-// Netlify Function: rewrite (deterministic ATS simulator + rewrite-to-95)
+// Netlify Function: rewrite (OpenAI rewrite + deterministic ATS scoring)
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
 export async function handler(event) {
   try {
     if (event.httpMethod !== "POST") {
@@ -6,30 +8,95 @@ export async function handler(event) {
     }
     const { resumeV1, jd } = JSON.parse(event.body || "{}");
     if (!resumeV1 || !jd) return json(400, { error: "Missing resumeV1 or jd" });
+    if (!OPENAI_API_KEY) return json(500, { error: "Missing OPENAI_API_KEY env var" });
 
     const sim = new ATSSim();
     const jdKeywords = sim.extractKeywords(jd);
+
+    // Score v1
     const s1 = sim.scoreResume(resumeV1, jdKeywords);
-    let v2 = rewriteTo95(resumeV1, jd, jdKeywords, sim);
-    const s2 = sim.scoreResume(v2, jdKeywords);
+
+    // Loop: ask OpenAI to rewrite → score → stop when >=95 or 3 passes
+    let current = resumeV1;
+    let sCurr = s1;
+    let passes = 0;
+    let lastMissing = sCurr.missing;
+
+    while (sCurr.total < 95 && passes < 3) {
+      const missing = sCurr.missing.map(m => m.term);
+      const rewritten = await openaiRewrite(current, jd, missing);
+      if (!rewritten || rewritten.trim().length < 50) {
+        // avoid empty/garbage responses
+        break;
+      }
+      current = rewritten.trim();
+      sCurr = sim.scoreResume(current, jdKeywords);
+      lastMissing = sCurr.missing;
+      passes++;
+    }
 
     const details = {
       jdKeywords,
       scoreV1_breakdown: s1.breakdown,
-      scoreV2_breakdown: s2.breakdown,
-      missing_after_v2: s2.missing,
+      scoreV2_breakdown: sCurr.breakdown,
+      missing_after_v2: lastMissing,
+      passes
     };
 
     return json(200, {
       scoreV1: s1.total,
-      resumeV2: v2,
-      scoreV2: s2.total,
+      resumeV2: current,
+      scoreV2: sCurr.total,
       details
     });
   } catch (e) {
     return json(500, { error: String(e?.message || e) });
   }
 }
+
+// ---------------- OpenAI call ----------------
+async function openaiRewrite(resumeV1, jd, missingTerms){
+  const body = {
+    model: "gpt-4o-mini",
+    temperature: 0,
+    messages: [
+      {
+        role: "system",
+        content: `You are a precise resume rewriter. Goal: weave the JD's missing keywords naturally across Summary (1-2 lines), Roles (bullet points with actions + impacts), and Skills (flat list). Keep facts plausible. Do not fabricate employers or degrees. Maintain senior tone. Avoid keyword dumping. Keep under ~900 words. Output ONLY the rewritten resume text, no markdown, no commentary.`
+      },
+      {
+        role: "user",
+        content:
+`JOB DESCRIPTION:
+${truncate(jd, 4000)}
+
+MISSING KEYWORDS TO ADD (high priority first):
+${(missingTerms||[]).slice(0,20).join(", ") || "None"}
+
+RESUME V1 (rewrite this into V2  with the missing terms woven across sections):
+${truncate(resumeV1, 4000)}`
+      }
+    ]
+  };
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`OpenAI ${res.status}: ${txt}`);
+  }
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content || "";
+  return text.trim();
+}
+
+function truncate(s, max){ s = String(s||""); return s.length>max ? s.slice(0,max) : s; }
 
 // ---------------- Utils ----------------
 function json(statusCode, obj) {
@@ -39,14 +106,6 @@ function json(statusCode, obj) {
     body: JSON.stringify(obj)
   };
 }
-function normalize(s) {
-  return (s || "")
-    .replace(/\r/g, " ")
-    .replace(/[^\w\s\-\+\.\%/]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-}
 function splitSentences(s) {
   return (s || "")
     .split(/\n+|(?<=\.)\s+(?=[A-Z])/g)
@@ -54,11 +113,10 @@ function splitSentences(s) {
     .filter(Boolean);
 }
 function uniq(arr){ return Array.from(new Set(arr)); }
+function round1(n){ return Math.round(n*10)/10; }
+function escapeRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 // ---------------- Lexicons ----------------
-const STOPWORDS = new Set(`a an the and or but of in on at for with to from by as is are was were be been being your you we they it this that these those over under during into after before about across our their us them i me my mine ours yours his her its if then than so such etc via per`.split(/\s+/));
-
-// Canonical skill phrases (expand as needed)
 const SKILL_LEXICON = [
   // Design core
   "design system","design systems","design tokens","component library","figma","figjam",
@@ -67,7 +125,7 @@ const SKILL_LEXICON = [
   "a/b testing","experimentation","metrics","data-informed","product strategy",
   // AI/agents
   "llm","large language model","prompt engineering","rag","agent","genai","ai ux","agentic ux",
-  // Frontend ecosystem (for JD matching context)
+  // Frontend ecosystem (context)
   "react","next.js","typescript","javascript","tailwind","node.js",
   // Platforms/process
   "jira","confluence","amplitude","mixpanel","segment",
@@ -100,25 +158,20 @@ const SYNONYMS = {
   "soc 2": ["soc2"],
 };
 
-// Action verbs used to craft role bullets deterministically
 const ACTION_VERBS = ["Led","Designed","Implemented","Optimized","Launched","Improved","Partnered","Migrated","Refactored","Streamlined"];
 
 // ---------------- ATS Simulator ----------------
 class ATSSim {
-  // Extract weighted JD keywords using lexicon + synonyms + simple section heuristics
   extractKeywords(jdRaw){
     const jd = jdRaw.toLowerCase();
     const buckets = { required: new Set(), core: new Set(), nice: new Set() };
-    // Heuristics by section markers
     const reqCtx = /(must|required|need(ed)?|minimum|required qualifications)/;
     const niceCtx = /(nice to have|bonus|preferred)/;
     const coreCtx = /(responsibilities|what you'll do|you will|about the role|role|what we need)/;
 
     for (const phrase of SKILL_LEXICON) {
       if (jd.includes(phrase)) {
-        // Decide bucket based on nearest markers
         let bucket = "core";
-        // Window around the phrase
         const idx = jd.indexOf(phrase);
         const start = Math.max(0, idx - 140);
         const end = Math.min(jd.length, idx + phrase.length + 140);
@@ -132,13 +185,11 @@ class ATSSim {
       }
     }
 
-    // Build keyword list with weights
     const list = [];
     for (const k of buckets.required) list.push({ term: k, weight: 3 });
     for (const k of buckets.core) list.push({ term: k, weight: 2 });
     for (const k of buckets.nice) list.push({ term: k, weight: 1 });
 
-    // If JD is sparse, fallback: pick top title words as core
     if (list.length < 6) {
       const titleLine = (jdRaw.split("\n")[0] || "").toLowerCase();
       for (const t of ["design system","figma","user research","accessibility","prototyping","a/b testing","react","llm","agent"]) {
@@ -148,7 +199,6 @@ class ATSSim {
       }
     }
 
-    // Normalize: remove duplicates by canonical
     const seen = new Set();
     const out = [];
     for (const item of list) {
@@ -162,7 +212,6 @@ class ATSSim {
     return out.sort((a,b)=>b.weight-a.weight || a.term.localeCompare(b.term));
   }
 
-  // Canonicalize using synonyms table
   canonical(term){
     term = term.toLowerCase();
     for (const [canon, syns] of Object.entries(SYNONYMS)) {
@@ -171,22 +220,17 @@ class ATSSim {
     return term;
   }
 
-  // Check if resume has a match for a keyword
   matchScore(resumeRaw, keyword){
     const resume = resumeRaw.toLowerCase();
-    // exact phrase
     if (resume.includes(keyword)) return 1.0;
-    // synonyms hit → 0.7
     const syns = SYNONYMS[keyword] || [];
     for (const s of syns) if (resume.includes(s)) return 0.7;
-    // head word lemmatized (simple stem)
     const head = keyword.split(/\s+/)[0];
     const headRe = new RegExp(`\\b${head.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(s|ing|ed)?\\b`);
     if (headRe.test(resume)) return 0.5;
     return 0;
   }
 
-  // Split resume into sections (summary, roles, skills)
   splitSections(resumeRaw){
     const raw = resumeRaw;
     const lower = raw.toLowerCase();
@@ -205,7 +249,6 @@ class ATSSim {
       const end = idxSkills >= 0 ? idxSkills : raw.length;
       roles = raw.slice(idxExp, end).replace(/^(experience|work experience|employment|roles|career)\s*[:\n]*/i,"").trim();
     } else {
-      // If no explicit Experience header, treat everything except skills as roles
       const end = idxSkills >= 0 ? idxSkills : raw.length;
       roles = raw.slice(0, end).trim();
     }
@@ -215,13 +258,10 @@ class ATSSim {
     return { summary, roles, skills };
   }
 
-  // Compute coverage, distribution, context, penalties
   scoreResume(resumeRaw, jdKeywords){
     const totalWords = resumeRaw.split(/\s+/).filter(Boolean).length;
     const { summary, roles, skills } = this.splitSections(resumeRaw);
-    const textLower = resumeRaw.toLowerCase();
 
-    // Coverage
     const W = jdKeywords.reduce((s,k)=>s+k.weight, 0) || 1;
     let M = 0;
     const perTerm = {};
@@ -233,7 +273,6 @@ class ATSSim {
     let coverage = 80 * (M / W);
     if (totalWords > 1200) coverage = Math.max(0, coverage - 2);
 
-    // Distribution
     function distinctHits(section){
       const sec = section.toLowerCase();
       const set = new Set();
@@ -247,12 +286,11 @@ class ATSSim {
     const dRoles = Math.min(1, distinctHits(roles)/needRoles);
     const dSkills = Math.min(1, distinctHits(skills)/needSkills);
     let distribution = 10 * (0.25*dSummary + 0.5*dRoles + 0.25*dSkills);
-    // Anti-dumping
+
     const totalDistinct = distinctHits(summary) + distinctHits(roles) + distinctHits(skills) || 1;
     const onlySkills = distinctHits(skills) >= (0.6 * totalDistinct);
     if (onlySkills) distribution = Math.min(distribution, 6);
 
-    // Context
     const verbs = ACTION_VERBS.map(v=>v.toLowerCase());
     let contextPoints = 0;
     const sentences = splitSentences(roles);
@@ -262,16 +300,13 @@ class ATSSim {
       if (!hasKW) continue;
       const hasVerb = verbs.some(v => new RegExp(`\\b${v.toLowerCase()}\\b`).test(sLower));
       if (hasVerb) contextPoints += 1;
-      // metric OR placeholder counts (+1)
       const hasMetric = /\b\d+(\.\d+)?\s?(%|k|m|ms|s|users|requests|teams|clients|revenue|leads)\b/.test(sLower) || /\[(metric|impact|result)s?\]/.test(sLower);
       if (hasVerb && hasMetric) contextPoints += 1;
       if (contextPoints >= 10) break;
     }
     const context = Math.min(10, contextPoints);
 
-    // Penalties
     let penalty = 0;
-    // Stuffing >3 per term
     for (const k of jdKeywords) {
       const re = new RegExp(`\\b${escapeRe(k.term)}\\b`, "gi");
       const count = (resumeRaw.match(re)||[]).length;
@@ -280,8 +315,6 @@ class ATSSim {
     penalty = Math.min(10, penalty);
 
     const total = Math.max(0, Math.min(100, round1(coverage + distribution + context - penalty)));
-
-    // Missing list (by low match score)
     const missing = jdKeywords.filter(k => perTerm[k.term] < 1).sort((a,b)=>b.weight-a.weight);
 
     return {
@@ -292,85 +325,4 @@ class ATSSim {
   }
 }
 
-function round1(n){ return Math.round(n*10)/10; }
-function escapeRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-
-// ---------------- Rewrite Loop ----------------
-function rewriteTo95(resumeV1, jd, jdKeywords, sim){
-  let current = resumeV1;
-  for (let pass = 0; pass < 3; pass++){
-    const score = sim.scoreResume(current, jdKeywords);
-    if (score.total >= 95) return current;
-    const missing = score.missing.slice(0, 12); // keep it sane
-
-    // Split sections
-    const sections = sim.splitSections(current);
-    let { summary, roles, skills } = sections;
-
-    // 1) Summary: add 2-4 highest weight missing terms
-    const addSummary = uniq(missing.filter(k=>k.weight>=2).map(k=>k.term)).slice(0,4);
-    if (addSummary.length){
-      if (!summary) summary = "";
-      const line = `Focused on ${toOxford(addSummary)}.`;
-      summary = ensurePrefixedHeader("Summary", summary);
-      summary = mergeSummary(summary, line);
-    }
-
-    // 2) Roles: weave bullets with action verbs + placeholders
-    const toWeave = missing.slice(0, 8).map(m=>m.term);
-    if (toWeave.length){
-      roles = ensurePrefixedHeader("Experience", roles || "");
-      const bullets = toWeave.map((term, i) => {
-        const verb = ACTION_VERBS[i % ACTION_VERBS.length];
-        return `• ${verb} initiatives in ${term} to improve outcomes [metric].`;
-      }).join("\n");
-      roles = roles.trim() + "\n" + bullets + "\n";
-    }
-
-    // 3) Skills: add remaining distinct terms
-    const skillsList = extractSkillList(skills);
-    const existing = new Set(skillsList.map(x=>x.toLowerCase()));
-    const toAdd = uniq(missing.map(m=>m.term).filter(t=>!existing.has(t.toLowerCase())));
-    const newSkills = uniq(skillsList.concat(toAdd)).slice(0, 60);
-    skills = ensurePrefixedHeader("Skills", newSkills.join(", "));
-
-    // Join sections back
-    current = joinSections({ summary, roles, skills });
-  }
-  return current;
-}
-
-function ensurePrefixedHeader(header, content){
-  content = (content || "").trim();
-  if (!content.toLowerCase().startsWith(header.toLowerCase())) {
-    return `${header}\n${content}`.trim();
-  }
-  return content;
-}
-function mergeSummary(summaryBlock, line){
-  const parts = summaryBlock.split("\n").map(s=>s.trim()).filter(Boolean);
-  if (parts.length <= 1) return `${parts[0]}\n${line}`.trim();
-  // Append as last sentence to first paragraph
-  const head = parts[0].replace(/\.*$/, "");
-  parts[0] = `${head}. ${line}`;
-  return parts.join("\n");
-}
-function extractSkillList(skillsBlock){
-  const s = (skillsBlock || "").replace(/^(skills?|tooling|technologies)\s*[:\n]*/i,"");
-  // split on commas or newlines
-  const arr = s.split(/,|\n|•/).map(x=>x.trim()).filter(Boolean);
-  return arr;
-}
-function joinSections({ summary, roles, skills }){
-  return [
-    summary?.trim() ? `${summary.trim()}` : "",
-    roles?.trim() ? `\n${roles.trim()}` : "",
-    skills?.trim() ? `\n${skills.trim()}` : ""
-  ].join("\n").trim() + "\n";
-}
-function toOxford(arr){
-  if (arr.length <= 2) return arr.join(" & ");
-  return `${arr.slice(0,-1).join(", ")} & ${arr[arr.length-1]}`;
-}
-
-// --------------- end ---------------
+// ---------------- netlify.toml & package will use Node 18+ ----------------

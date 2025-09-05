@@ -1,5 +1,5 @@
 {
-  "name": "ats-sim-app",
+  "name": "ats-sim-openai",
   "private": true,
   "version": "1.0.0",
   "scripts": {

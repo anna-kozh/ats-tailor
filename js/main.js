@@ -35,7 +35,7 @@
     }
     try {
       rewriteBtn.disabled = true;
-      status.innerHTML = `<span class="spinner"></span> Rewriting…`;
+      status.innerHTML = `<span class="spinner"></span> Rewriting with OpenAI…`;
       const res = await fetch("/.netlify/functions/rewrite", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
