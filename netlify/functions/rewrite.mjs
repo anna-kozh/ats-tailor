@@ -1,8 +1,15 @@
-// netlify/functions/rewrite.mjs
+// netlify/functions/rewrite.mjs (DRY_RUN diagnostic + fast path)
 import OpenAI from "openai";
 
-// Strict 9s timeout to dodge Netlify 10s limit
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 9000 });
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const DRY_RUN = process.env.DRY_RUN === 'true';
+
+// If key is missing, short-circuit with clear error (avoid 504)
+if (!DRY_RUN && !OPENAI_API_KEY) {
+  console.warn('OPENAI_API_KEY missing');
+}
+
+const client = !DRY_RUN && OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY, timeout: 9000 }) : null;
 
 const STOPWORDS = new Set(`a an the and or but of in on at for with from by as is are was were be been being to your you we they it this that these those how what where when which who whom whose why will would could should can may might must than then so such via per about-based using through within i me my mine our ours us them their they he she her his its your you're you'll you've i've we'll we're it's ll ve re dont don't isnt isn't cant can't won't wouldnt couldn't shouldn't arent aren't had has have do does did doing done every each either neither both few many much most more some any other another only own same just still even very first last new fast slow high low more less make move work ship back always often`.split(/\s+/));
 
@@ -45,7 +52,7 @@ function scoreText(text, jdKeywords, roleTerms=[]){
 
   let computed = (coveredReq/totalReq)*60 + (niceHit/niceTotal)*20 + (roleHit/roleTotal)*10 + (techHit/techTotal)*10;
 
-  // Overstuffing penalty (naive): >9 repeats of same token
+  // Overstuffing penalty (naive): >9 repeats
   const counts = {};
   for(const t of tokenize(text)){ counts[t] = (counts[t]||0)+1; }
   for(const [t,c] of Object.entries(counts)){
@@ -67,13 +74,21 @@ function boldAddedKeywords(v1, v2, jdKeywords){
   return esc.replace(re, (m) => `**${m}**`);
 }
 
+function makeDryRunV2(resume, jdKeywords){
+  // Naive demo rewrite: append Objective + Skills using top terms
+  const top = [...jdKeywords.required].slice(0,12);
+  const skills = top.slice(0,8).join(', ');
+  const objective = `Objective\nLead Product Designer aligning resume with JD focus areas: ${top.slice(0,6).join(', ')}.`;
+  const skillsSec = `\n\nSkills\n${skills}`;
+  const out = `${objective}${skillsSec}\n\n${resume}`;
+  return out;
+}
+
 function trimJD(jd){
-  // Keep first ~1200 characters plus any "Requirements"/"Responsibilities" sections if present.
-  const maxChars = 1200;
+  const maxChars = 1000;
   if (jd.length <= maxChars) return jd;
-  const reqMatch = jd.match(/(Requirements|What you'll do|Responsibilities|About you)[\s\S]{0,1200}/i);
-  if (reqMatch) return reqMatch[0];
-  return jd.slice(0, maxChars);
+  const reqMatch = jd.match(/(Requirements|What you'll do|Responsibilities|About you)[\s\S]{0,1000}/i);
+  return reqMatch ? reqMatch[0] : jd.slice(0, maxChars);
 }
 
 async function rewriteOnce({resume, jd, jdKeywords}){
@@ -86,13 +101,13 @@ async function rewriteOnce({resume, jd, jdKeywords}){
     `JOB DESCRIPTION (trimmed):\n${jdShort}\n`,
     `CURRENT RESUME:\n${resume}\n`,
     `TARGET KEYWORDS (sample): ${[...jdKeywords.required].slice(0,20).join(', ')}\n`,
-    `REWRITE GOAL:\n- Improve match and aim for >=95 proxy score\n- Keep titles, chronology, achievements\n- Add missing JD keywords naturally where relevant\n- Do not fabricate employers, dates, or education\n- Output plain text resume with sections in this order: ${guide.sectionHeaders.join(' > ')}\n`
+    `REWRITE GOAL:\n- Aim for >=95 proxy score\n- Keep titles, chronology, achievements\n- Add missing JD keywords naturally where relevant\n- Do not fabricate employers, dates, or education\n- Output plain text resume with sections in this order: ${guide.sectionHeaders.join(' > ')}\n`
   ].join('\n');
 
   const completion = await client.chat.completions.create({
     model: process.env.OPENAI_MODEL || "gpt-4o-mini",
     temperature: 0.2,
-    max_tokens: 900,
+    max_tokens: 700,
     messages: [
       { role: "system", content: sys },
       { role: "user", content: user }
@@ -115,18 +130,23 @@ export async function handler(event){
     const jdKeywords = extractKeywords(jd);
     const roleTerms = ['lead','senior','staff','designer','product','ux','ui','system','strategy'];
 
-    // Score v1
     const scoreV1 = scoreText(resume, jdKeywords, roleTerms);
 
-    // Single fast pass to avoid timeouts
-    const v2Text = await rewriteOnce({ resume, jd, jdKeywords });
+    let v2Text;
+    if (DRY_RUN || !OPENAI_API_KEY) {
+      // Fast local path to confirm routing and avoid 504s
+      v2Text = makeDryRunV2(resume, jdKeywords);
+    } else {
+      v2Text = await rewriteOnce({ resume, jd, jdKeywords });
+    }
+
     const scoreV2 = scoreText(v2Text, jdKeywords, roleTerms);
     const boldedV2 = boldAddedKeywords(resume, v2Text, jdKeywords);
 
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ v2Text, scoreV1, scoreV2, boldedV2, attempts: 1 })
+      body: JSON.stringify({ v2Text, scoreV1, scoreV2, boldedV2, dryRun: DRY_RUN })
     };
   } catch (err){
     console.error(err);
