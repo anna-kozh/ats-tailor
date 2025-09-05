@@ -2,7 +2,7 @@
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4o-mini';
-const FETCH_TIMEOUT_MS = 30000; // 30s to avoid 502s
+const FETCH_TIMEOUT_MS = 30000; // 30s general
 
 export default async function handler(req) {
   if (req.method !== 'POST') return json({ error: 'Use POST' }, 405);
@@ -15,8 +15,15 @@ export default async function handler(req) {
   if (action === 'analyze') {
     const { resume = '', jd = '' } = body || {};
     if (!resume || !jd) return json({ error: 'Missing resume or jd' }, 400);
-    const score = await scorePair(resume, jd);
-    return json({ match_score: score });
+    try {
+      // Fast path with strict limits
+      const score = await scorePairFast(resume, jd);
+      return json({ match_score: score });
+    } catch (e) {
+      // Local fallback under 10s Netlify limit
+      const score = localSimilarity(resume, jd);
+      return json({ match_score: score, fallback: true });
+    }
   }
 
   if (action === 'rewrite') {
@@ -58,6 +65,42 @@ export default async function handler(req) {
 }
 
 /** ----- helpers ----- */
+function trimMiddle(str, maxChars = 8000) {
+  if (str.length <= maxChars) return str;
+  const half = Math.floor(maxChars / 2);
+  return str.slice(0, half) + "\n...\n" + str.slice(-half);
+}
+
+async function scorePairFast(resume, jd) {
+  // Keep the payload tiny, and fail fast within ~8s to fit Netlify free limits
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error('timeout')), 8000);
+
+  const system = 'Return ONLY JSON: { "match_score": number }. Score 0-100 based on exact phrase overlap between resume and JD. Short output.';
+  const user = JSON.stringify({ resume: trimMiddle(resume, 6000), jd: trimMiddle(jd, 4000) });
+  try {
+    const j = await openAI({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user }
+      ],
+      temperature: 0,
+      top_p: 1,
+      response_format: { type: 'json_object' },
+      max_tokens: 30
+    }, controller.signal);
+    clearTimeout(timeout);
+    const v = Number(j?.match_score);
+    if (Number.isFinite(v)) return Math.max(0, Math.min(100, v));
+    throw new Error('bad json');
+  } catch (e) {
+    clearTimeout(timeout);
+    throw e;
+  }
+}
+
+// Original (slower) scorer used elsewhere
 async function scorePair(resume, jd) {
   const system = [
     'You are an ATS evaluator. Return ONLY JSON: { "match_score": number }.',
@@ -131,13 +174,11 @@ async function rewritePass(resume, jd, gaps = []) {
   return String(data?.rewritten_resume || '').trim();
 }
 
-/** Sanitize: enforce <=10 skills in the Skills block and dedupe items */
 function sanitizeResume(text = '') {
   try {
     const lines = text.split(/\r?\n/);
     const start = lines.findIndex(l => /skills\s*&\s*tools\s*match/i.test(l));
     if (start === -1) return text;
-    // collect until blank line or next heading
     let i = start + 1;
     const buf = [];
     while (i < lines.length && !/^[A-Z][A-Z \-]{3,}$/.test(lines[i]) && lines[i].trim() !== '') {
@@ -154,18 +195,25 @@ function sanitizeResume(text = '') {
     ));
     const limited = items.slice(0, 10);
     const formatted = limited.map(it => `- ${it}`).join('\n');
-
-    // rebuild
-    const newLines = lines.slice(0, start + 1) \
-      .concat([formatted, '']) \
-      .concat(lines.slice(i));
+    const newLines = lines.slice(0, start + 1).concat([formatted, '']).concat(lines.slice(i));
     return newLines.join('\n');
   } catch {
     return text;
   }
 }
 
-async function openAI(payload) {
+// very fast, crude similarity as a fallback
+function localSimilarity(resume, jd) {
+  const norm = s => s.toLowerCase().replace(/[^a-z0-9\s]/g,' ').split(/\s+/).filter(w => w.length > 2);
+  const r = new Set(norm(resume));
+  const j = new Set(norm(jd));
+  let inter = 0;
+  for (const w of j) if (r.has(w)) inter++;
+  const score = j.size ? Math.round((inter / j.size) * 100) : 0;
+  return Math.max(0, Math.min(100, score));
+}
+
+async function openAI(payload, signal) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(new Error('timeout')), FETCH_TIMEOUT_MS);
   try {
@@ -173,7 +221,7 @@ async function openAI(payload) {
       method: 'POST',
       headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      signal: controller.signal
+      signal: signal || controller.signal
     });
     if (!res.ok) {
       const t = await res.text().catch(() => '');
