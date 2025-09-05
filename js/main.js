@@ -1,65 +1,74 @@
-(() => {
-  const $ = (id) => document.getElementById(id);
-  const rewriteBtn = $("rewriteBtn");
-  const status = $("status");
-  const scoreV1 = $("scoreV1");
-  const scoreV2 = $("scoreV2");
-  const v2Out = $("v2");
-  const debug = $("debug");
-  const resumeEl = $("resume");
-  const jdEl = $("jd");
+const el = (id) => document.getElementById(id);
+const $resume = el('resume');
+const $jd = el('jd');
+const $ats = el('atsSelect');
+const $rewrite = el('rewriteBtn');
+const $status = el('status');
+const $v2 = el('v2');
+const $v1Echo = el('v1Echo');
+const $scoreV1 = el('scoreV1');
+const $scoreV2 = el('scoreV2');
+const $debug = el('debug');
+const $missingChips = el('missingChips');
 
-  function setScorePill(el, label, score){
-    el.textContent = `${label}: ${score === null ? "—" : Math.round(score)}`;
-    el.classList.remove("ok","warn","bad");
-    if (score === null) { el.classList.add("bad"); return; }
-    if (score >= 95) el.classList.add("ok");
-    else if (score >= 75) el.classList.add("warn");
-    else el.classList.add("bad");
-  }
 
-  async function rewrite(){
-    const resumeV1 = resumeEl.value.trim();
-    const jd = jdEl.value.trim();
-    // Clear previous state
-    setScorePill(scoreV1, "v1", null);
-    setScorePill(scoreV2, "v2", null);
-    v2Out.textContent = "—";
-    v2Out.classList.add("muted");
-    debug.textContent = "—";
-    debug.classList.add("muted");
+function setStatus(msg) { $status.textContent = msg; }
+function clearScores() {
+$scoreV1.textContent = 'v1: —';
+$scoreV2.textContent = 'v2: —';
+}
+function setScore(elm, label, score) {
+elm.textContent = `${label}: ${Math.round(score)}`;
+elm.classList.remove('ok','warn');
+elm.classList.add(score >= 90 ? 'ok' : 'warn');
+}
 
-    if(!resumeV1 || !jd){
-      status.textContent = "Paste both resume and JD.";
-      return;
-    }
-    try {
-      rewriteBtn.disabled = true;
-      status.innerHTML = `<span class="spinner"></span> Rewriting with OpenAI…`;
-      const res = await fetch("/.netlify/functions/rewrite", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ resumeV1, jd })
-      });
-      if(!res.ok){
-        const txt = await res.text();
-        throw new Error(`HTTP ${res.status}: ${txt}`);
-      }
-      const data = await res.json();
-      setScorePill(scoreV1, "v1", data.scoreV1);
-      setScorePill(scoreV2, "v2", data.scoreV2);
-      v2Out.textContent = data.resumeV2 || "—";
-      v2Out.classList.toggle("muted", !data.resumeV2);
-      debug.textContent = JSON.stringify(data.details, null, 2);
-      debug.classList.remove("muted");
-      status.textContent = data.scoreV2 >= 95 ? "Done." : "Reached max passes; tweak v1 for better fit.";
-    } catch (err){
-      console.error(err);
-      status.textContent = err.message || "Error. See console.";
-    } finally {
-      rewriteBtn.disabled = false;
-    }
-  }
 
-  rewriteBtn.addEventListener("click", rewrite);
-})();
+// --- Deterministic Scorer (client-side, matches server logic conceptually) ---
+const DEFAULT_SYNONYMS = {
+'ux': ['user experience'],
+'ui': ['user interface'],
+'llm': ['large language model','foundation model'],
+'genai': ['generative ai','gen ai'],
+'rag': ['retrieval augmented generation','retrieval-augmented generation'],
+'a/b': ['ab testing','a b testing','experiment'],
+};
+
+
+function tokenize(text) {
+return text
+.toLowerCase()
+.replace(/[^a-z0-9+/#.&\-\s]/g, ' ')
+.split(/\s+/)
+.filter(Boolean);
+}
+
+
+function unique(arr) { return [...new Set(arr)]; }
+
+
+function extractKeywords(jd) {
+// naive pull of likely keywords from JD sections
+const tokens = tokenize(jd);
+const stop = new Set(['and','or','the','a','to','for','with','in','of','on','at','by','is','are','as','be','this','that','an','will','can','we','you','our','your','from','into','across','over','within']);
+const freq = new Map();
+for (const t of tokens) {
+if (stop.has(t) || t.length < 2) continue;
+freq.set(t, (freq.get(t) || 0) + 1);
+}
+// pick top 60 distinct terms, keep tool-ish tokens
+const top = [...freq.entries()].sort((a,b)=>b[1]-a[1]).slice(0, 120).map(([t])=>t);
+// merge synonyms
+const expanded = new Set(top);
+for (const [k, syns] of Object.entries(DEFAULT_SYNONYMS)) {
+if (expanded.has(k)) syns.forEach(s => expanded.add(s));
+}
+return unique([...expanded]);
+}
+
+
+function scoreAgainst(jdKeywords, resumeText, atsProfile='auto') {
+const resTokens = new Set(tokenize(resumeText));
+const mustHaves = jdKeywords.slice(0, 35); // heuristic: first 35 most-frequent terms
+let found = 0; const missing = [];
+$rewrite.addEventListener('click', runRewrite);}
