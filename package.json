@@ -1,9 +1,8 @@
 {
-  "name": "ats-sim-openai",
+  "name": "ats-optimizer",
+  "type": "module",
   "private": true,
-  "version": "1.0.0",
-  "scripts": {
-    "start": "netlify dev",
-    "build": "echo 'No build step'"
+  "dependencies": {
+    "openai": "^4.58.1"
   }
 }

@@ -1,104 +1,72 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ATS Resume Rewriter</title>
-    <style>
-      :root {
-        --bg: #0e0f12; --card:#15171c; --muted:#9aa3af; --text:#e5e7eb; --accent:#60a5fa;
-        --ok:#22c55e; --warn:#f59e0b; --err:#ef4444; --border:#23262d;
-      }
-      * { box-sizing: border-box }
-      body { margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; background:var(--bg); color:var(--text); }
-      header { padding:16px 20px; border-bottom:1px solid var(--border); position:sticky; top:0; background:rgba(14,15,18,.9); backdrop-filter: blur(8px); }
-      h1 { font-size:18px; margin:0; letter-spacing:.2px }
-      .wrap { max-width:1120px; margin:0 auto; padding:20px; }
-      .grid { display:grid; gap:16px }
-      @media (min-width: 1100px) {
-        .grid-2 { grid-template-columns: 1fr 1fr }
-        .grid-3 { grid-template-columns: 1fr 1fr 1fr }
-      }
-      .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px }
-      .card h2 { font-size:14px; margin:0 0 8px 0; color:var(--muted); font-weight:600; }
-      textarea { width:100%; min-height:220px; background:#0c0d10; color:var(--text); border:1px solid var(--border); border-radius:12px; padding:12px; line-height:1.4; resize: vertical; }
-      select, button, .pill { height:40px; border-radius:10px; border:1px solid var(--border); background:#0c0d10; color:var(--text); padding:0 12px; }
-      button { background:linear-gradient(180deg,#1e293b,#0b1220); border:1px solid #1f2937; cursor:pointer }
-      button[disabled] { opacity:.6; cursor:not-allowed }
-      .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap }
-      .spacer { flex:1 }
-      .pill { display:inline-flex; align-items:center; padding:0 10px; font-size:13px }
-      .pill.ok { border-color:#1f3d27; background:#0b1a10; color:var(--ok) }
-      .pill.warn { border-color:#3d2f1f; background:#1a140b; color:var(--warn) }
-      .status { font-size:13px; color:var(--muted) }
-      #v2, #v1Echo, #debug { white-space:pre-wrap }
-      .hl-add { font-weight:700 }
-      .muted { color:var(--muted) }
-      .small { font-size:12px }
-      .chips { display:flex; gap:8px; flex-wrap:wrap }
-      .chip { background:#101216; border:1px solid var(--border); padding:6px 8px; border-radius:999px; font-size:12px }
-      .footer { margin-top:8px; color:var(--muted); font-size:12px }
-    </style>
-  </head>
-  <body>
-    <header class="row">
-      <h1>ATS Resume Rewriter</h1>
-      <div class="spacer"></div>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ATS Rewrite to 95% — OpenAI + Proxy Score</title>
+  <style>
+    :root {
+      --bg:#0b0c10; --card:#15171c; --ink:#e8eaed; --muted:#9aa0a6; --accent:#7aa6ff;
+    }
+    *{box-sizing:border-box}
+    body{margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background:var(--bg); color:var(--ink);}
+    header{padding:20px 16px; display:flex; gap:12px; align-items:center; border-bottom:1px solid #262a33}
+    header h1{font-size:18px; margin:0}
+    main{max-width:1100px; margin:0 auto; padding:16px; display:grid; grid-template-columns:1fr; gap:16px}
+    @media(min-width:1000px){ main{grid-template-columns:1fr 1fr} }
+    .card{background:var(--card); border:1px solid #262a33; border-radius:16px; padding:14px; box-shadow:0 1px 8px rgba(0,0,0,.35)}
+    textarea{width:100%; min-height:280px; background:#0f1115; color:var(--ink); border:1px solid #2b2f38; border-radius:12px; padding:12px; resize:vertical; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace}
+    label{display:block; font-weight:600; margin-bottom:8px}
+    .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+    button{border:0; background:var(--accent); color:#0b0c10; padding:12px 16px; border-radius:12px; font-weight:700; cursor:pointer}
+    button[disabled]{opacity:.5; cursor:wait}
+    .small{font-size:12px; color:var(--muted)}
+    .scores{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+    .pill{padding:6px 10px; border-radius:999px; font-weight:700; font-size:12px; border:1px solid #2b2f38}
+    .pill.ok{background:rgba(34,197,94,.12); color:#86efac; border-color:rgba(34,197,94,.35)}
+    .pill.warn{background:rgba(245,158,11,.12); color:#fde68a; border-color:rgba(245,158,11,.35)}
+    .pill.bad{background:rgba(239,68,68,.12); color:#fecaca; border-color:rgba(239,68,68,.35)}
+    .out{white-space:pre-wrap; background:#0f1115; padding:12px; border-radius:12px; border:1px solid #2b2f38; min-height:280px}
+    .muted{color:var(--muted)}
+    .spinner{display:inline-block; width:16px; height:16px; border:2px solid #ffffff40; border-top-color:#fff; border-radius:50%; animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .section-title{font-weight:700; margin:8px 0 4px 0; font-size:13px; color:#b6c3ff}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ATS Rewrite → 95% (OpenAI + Proxy Score)</h1>
+    <div class="small">Paste resume and JD. One click. OpenAI rewrites, our simulator scores.</div>
+  </header>
+
+  <main>
+    <section class="card">
+      <label for="resume">Resume v1 (paste plain text)</label>
+      <textarea id="resume" placeholder="Paste your resume text..."></textarea>
+      <div class="small">Tip: keep it under ~1200 words for best results.</div>
+    </section>
+
+    <section class="card">
+      <label for="jd">Job Description</label>
+      <textarea id="jd" placeholder="Paste the full JD..."></textarea>
+    </section>
+
+    <section class="card" style="grid-column:1/-1">
       <div class="row">
-        <span id="scoreV1" class="pill warn">v1: —</span>
-        <span id="scoreV2" class="pill ok">v2: —</span>
+        <button id="rewriteBtn">Rewrite</button>
+        <div id="status" class="small muted"></div>
       </div>
-    </header>
+      <div style="height:8px"></div>
+      <div class="scores">
+        <div id="scoreV1" class="pill bad">v1: —</div>
+        <div id="scoreV2" class="pill bad">v2: —</div>
+      </div>
+      <div style="height:12px"></div>
+      <div class="section-title">Rewritten Resume v2</div>
+      <div id="v2" class="out muted">—</div>
+    </section>
+  </main>
 
-    <div class="wrap grid grid-2">
-      <section class="card">
-        <div class="row" style="margin-bottom:8px">
-          <h2>Resume v1</h2>
-          <div class="spacer"></div>
-          <label class="small muted" for="atsSelect">ATS</label>
-          <select id="atsSelect" title="Choose ATS profile">
-            <option value="auto">Detect automatically</option>
-            <option>Workday</option>
-            <option>Greenhouse</option>
-            <option>Lever</option>
-            <option>iCIMS</option>
-            <option>Taleo</option>
-            <option>SuccessFactors</option>
-            <option>Ashby</option>
-            <option>SmartRecruiters</option>
-          </select>
-          <button id="rewriteBtn">Rewrite</button>
-        </div>
-        <textarea id="resume" placeholder="Paste your current resume text here…"></textarea>
-        <div class="footer">We’ll never send your API key to the browser. Serverless only.</div>
-      </section>
-
-      <section class="card">
-        <h2>Job Description</h2>
-        <textarea id="jd" placeholder="Paste the target job description here…"></textarea>
-      </section>
-
-      <section class="card">
-        <div class="row" style="margin-bottom:6px">
-          <h2>Rewritten Resume v2</h2>
-          <div class="spacer"></div>
-          <div id="status" class="status">Idle</div>
-        </div>
-        <div id="v2" class="small"></div>
-      </section>
-
-      <section class="card">
-        <h2>Resume v1 (echo)</h2>
-        <div id="v1Echo" class="small muted"></div>
-      </section>
-
-      <section class="card" style="grid-column: 1 / -1">
-        <h2>Why this score (debug)</h2>
-        <div id="debug" class="small muted"></div>
-        <div class="chips" id="missingChips"></div>
-      </section>
-    </div>
-
-    <script src="/js/main.js" defer></script>
-  </body>
+  <script src="./js/main.js"></script>
+</body>
 </html>

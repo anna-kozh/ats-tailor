@@ -1,74 +1,74 @@
-const el = (id) => document.getElementById(id);
-const $resume = el('resume');
-const $jd = el('jd');
-const $ats = el('atsSelect');
-const $rewrite = el('rewriteBtn');
-const $status = el('status');
-const $v2 = el('v2');
-const $v1Echo = el('v1Echo');
-const $scoreV1 = el('scoreV1');
-const $scoreV2 = el('scoreV2');
-const $debug = el('debug');
-const $missingChips = el('missingChips');
+// js/main.js
+const $resume = document.getElementById('resume');
+const $jd = document.getElementById('jd');
+const $rewrite = document.getElementById('rewriteBtn');
+const $status = document.getElementById('status');
+const $v2 = document.getElementById('v2');
+const $scoreV1 = document.getElementById('scoreV1');
+const $scoreV2 = document.getElementById('scoreV2');
 
-
-function setStatus(msg) { $status.textContent = msg; }
-function clearScores() {
-$scoreV1.textContent = 'v1: —';
-$scoreV2.textContent = 'v2: —';
-}
-function setScore(elm, label, score) {
-elm.textContent = `${label}: ${Math.round(score)}`;
-elm.classList.remove('ok','warn');
-elm.classList.add(score >= 90 ? 'ok' : 'warn');
+function setStatus(msg, spinning=false){
+  if(!msg){ $status.textContent=''; return; }
+  $status.innerHTML = spinning ? `<span class="spinner" aria-hidden="true"></span> ${msg}` : msg;
 }
 
-
-// --- Deterministic Scorer (client-side, matches server logic conceptually) ---
-const DEFAULT_SYNONYMS = {
-'ux': ['user experience'],
-'ui': ['user interface'],
-'llm': ['large language model','foundation model'],
-'genai': ['generative ai','gen ai'],
-'rag': ['retrieval augmented generation','retrieval-augmented generation'],
-'a/b': ['ab testing','a b testing','experiment'],
-};
-
-
-function tokenize(text) {
-return text
-.toLowerCase()
-.replace(/[^a-z0-9+/#.&\-\s]/g, ' ')
-.split(/\s+/)
-.filter(Boolean);
+function setPill($el, label, score){
+  if (typeof score !== 'number' || isNaN(score)) {
+    $el.className = 'pill bad';
+    $el.textContent = `${label}: —`;
+    return;
+  }
+  const cls = score >= 95 ? 'ok' : score >= 75 ? 'warn' : 'bad';
+  $el.className = `pill ${cls}`;
+  $el.textContent = `${label}: ${Math.round(score)}`;
 }
 
+function htmlEscape(s){ return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-function unique(arr) { return [...new Set(arr)]; }
+$rewrite.addEventListener('click', async () => {
+  const resume = $resume.value.trim();
+  const jd = $jd.value.trim();
 
+  if(!resume || !jd){
+    setStatus('Please paste both Resume and JD.', false);
+    return;
+  }
 
-function extractKeywords(jd) {
-// naive pull of likely keywords from JD sections
-const tokens = tokenize(jd);
-const stop = new Set(['and','or','the','a','to','for','with','in','of','on','at','by','is','are','as','be','this','that','an','will','can','we','you','our','your','from','into','across','over','within']);
-const freq = new Map();
-for (const t of tokens) {
-if (stop.has(t) || t.length < 2) continue;
-freq.set(t, (freq.get(t) || 0) + 1);
-}
-// pick top 60 distinct terms, keep tool-ish tokens
-const top = [...freq.entries()].sort((a,b)=>b[1]-a[1]).slice(0, 120).map(([t])=>t);
-// merge synonyms
-const expanded = new Set(top);
-for (const [k, syns] of Object.entries(DEFAULT_SYNONYMS)) {
-if (expanded.has(k)) syns.forEach(s => expanded.add(s));
-}
-return unique([...expanded]);
-}
+  // Clear previous results
+  $v2.textContent = '—';
+  $v2.classList.add('muted');
+  setPill($scoreV1, 'v1', NaN);
+  setPill($scoreV2, 'v2', NaN);
 
+  $rewrite.disabled = true;
+  setStatus('Working on your resume…', true);
 
-function scoreAgainst(jdKeywords, resumeText, atsProfile='auto') {
-const resTokens = new Set(tokenize(resumeText));
-const mustHaves = jdKeywords.slice(0, 35); // heuristic: first 35 most-frequent terms
-let found = 0; const missing = [];
-$rewrite.addEventListener('click', runRewrite);}
+  try {
+    const resp = await fetch('/.netlify/functions/rewrite', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ resume, jd })
+    });
+    if(!resp.ok){
+      const t = await resp.text().catch(()=>'');
+      throw new Error(`Server error ${resp.status}: ${t || resp.statusText}`);
+    }
+    const data = await resp.json();
+
+    // Expect: { v2Text, scoreV1, scoreV2, boldedV2 }
+    const { v2Text, scoreV1, scoreV2, boldedV2 } = data;
+
+    setPill($scoreV1, 'v1', scoreV1);
+    setPill($scoreV2, 'v2', scoreV2);
+
+    $v2.innerHTML = boldedV2 ? boldedV2 : htmlEscape(v2Text || 'No output');
+    $v2.classList.remove('muted');
+    setStatus('Done ✓');
+
+  } catch (err){
+    console.error(err);
+    setStatus(`Error: ${err.message || err}`, false);
+  } finally {
+    $rewrite.disabled = false;
+  }
+});

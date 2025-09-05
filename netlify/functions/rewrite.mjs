@@ -1,513 +1,149 @@
-// Netlify Function: rewrite (Modern ATS-style scoring + OpenAI rewrite)
-// One fast pass per click to avoid 504 timeouts. Click again to iterate.
-// Env: OPENAI_API_KEY
+// netlify/functions/rewrite.mjs
+import OpenAI from "openai";
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL = "gpt-4o-mini";
-const OPENAI_TIMEOUT_MS = 15000; // increased from 8000 for stability
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-export async function handler(event) {
-  try {
-    if (event.httpMethod !== "POST") return json(405, { error: "Use POST" });
-    const { resumeV1, jd } = JSON.parse(event.body || "{}");
-    if (!resumeV1 || !jd) return json(400, { error: "Missing resumeV1 or jd" });
-    if (!OPENAI_API_KEY) return json(500, { error: "Missing OPENAI_API_KEY env var" });
+// --- Keyword extraction + scoring ---
+const STOPWORDS = new Set(`a an the and or but of in on at for with from by as is are was were be been being to your you we they it this that these those how what where when which who whom whose why will would could should can may might must than then so such via per about-based using through within i me my mine our ours us them their they he she her his its your you're you'll you've i've we'll we're it's ll ve re dont don't isnt isn't cant can't won't wouldnt couldn't shouldn't arent aren't had has have do does did doing done every each either neither both few many much most more some any other another only own same just still even very first last new fast slow high low more less make move work ship back always often`.split(/\s+/));
 
-    // 1) Mine JD → weighted terms (1–3-grams, TF-IDF-ish + section hints)
-    const jdTerms = mineJDTerms(jd);
-
-    // 2) Score v1 deterministically (Coverage 70 + Placement 15 + Context 15 − Penalties ≤10)
-    const s1 = scoreResume(resumeV1, jdTerms);
-
-    // 3) Plan keywords to lift to 95 (deterministic greedy marginal-gain)
-    const plan = planTo95(jdTerms, s1, 95);
-
-    // 4) One OpenAI rewrite pass per request (avoid 504s). It will weave the plan.
-    let resumeV2 = resumeV1;
-    let s2 = s1;
-    if (s1.total < 95 && plan.items.length) {
-      resumeV2 = await openaiRewrite({
-        resumeV1: truncate(resumeV1, 3000),
-        jd: truncate(jd, 3000),
-        plan: plan.items
-      });
-      if (!resumeV2 || resumeV2.trim().length < 50) resumeV2 = resumeV1; // safety
-      s2 = scoreResume(resumeV2, jdTerms);
-    }
-
-    return json(200, {
-      scoreV1: s1.total,
-      resumeV2,
-      scoreV2: s2.total,
-      details: {
-        jdTerms,
-        plan: plan.items,
-        projectedAfterPlan: plan.projected,
-        v1_breakdown: s1.breakdown,
-        v2_breakdown: s2.breakdown,
-        nextAction: s2.total >= 95 ? "done" : "rewrite_again"
-      }
-    });
-  } catch (e) {
-    return json(500, { error: String(e?.message || e) });
-  }
-}
-
-/* =========================
-   Keyword mining (JD → terms)
-   ========================= */
-
-// stricter stopwords (kills junk like how/ll/re/ve/first/work/etc)
-const STOPWORDS = new Set(`
-a an the and or but of in on at for with from by as is are was were be been being to your you we they it this that these those how what where when which who whom whose why will would could should can may might must than then so such via per about-based using through within
-i me my mine our ours us them their they he she her his its your you're you'll you've i've we'll we're it's
-ll ve re dont don't isnt isn't cant can't won't wouldnt couldn't shouldn't arent aren't had has have do does did doing done
-every each either neither both few many much most more some any other another only own same just still even very first last new fast slow high low more less make move work ship back always often
-`.replace(/\s+/g,' ').trim().split(/\s+/));
-
-// allow single-word terms only if whitelisted; bigrams/trigrams are fine
-const SINGLE_WORD_WHITELIST = new Set([
-  // domain/tech
-  "ai","llm","hipaa","fhir","hl7","ehr","emr","crm","phi",
-  "react","typescript","javascript","next.js","nextjs","node","node.js","tailwind",
-  "figma","figjam","amplitude","mixpanel","segment",
-  // healthcare ops
-  "telehealth","triage","scheduling","routing","ivr","sip","compliance",
-  // design
-  "accessibility","wcag","prototyping","tokens"
-]);
-
-const SYNONYMS = {
-  "design system": ["design systems","component library","component libraries","ui kit","ui system"],
-  "design tokens": ["tokens","color tokens","typography tokens"],
-  "user research": ["ux research","customer interviews","user interviews","discovery research"],
-  "usability testing": ["user testing","ux testing","usability studies","research sessions"],
-  "accessibility": ["a11y","wcag"],
-  "prototyping": ["prototype","prototypes","rapid prototyping","hi-fi prototype","low-fi prototype"],
-  "interaction design": ["ixd","user flows","flows"],
-  "visual design": ["ui design","interface design"],
-  "a/b testing": ["experimentation","ab testing","split testing"],
-  "llm": ["large language model","foundation model","foundational model"],
-  "rag": ["retrieval augmented generation","retrieval-augmented generation"],
-  "prompt engineering": ["prompt design","prompting"],
-  "agent": ["agentic","autonomous agent","copilot","assistant","ai agent","agentic ux"],
-  "react": ["react.js","reactjs"],
-  "node.js": ["node","nodejs"],
-  "typescript": ["ts"],
-  "javascript": ["js"],
-  "next.js": ["next","nextjs"],
-  "hipaa": ["phi","health privacy"],
-  "soc 2": ["soc2"]
-};
-const CANON_KEYS = Object.keys(SYNONYMS);
-
-const JD_REQ_HINTS  = /(must|required|minimum|qualifications|requirements)/i;
-const JD_RESP_HINTS = /(responsibilities|what you'll do|you will|about the role|role)/i;
-const JD_NICE_HINTS = /(nice to have|preferred|bonus)/i;
-
-function tokenize(s) {
-  return (s || "")
+function tokenize(text){
+  return (text || "")
     .toLowerCase()
-    .replace(/[^a-z0-9\+\#\.\- ]+/g, " ")
+    .replace(/[^a-z0-9+/#.&\- ]/g, " ")
     .split(/\s+/)
-    .filter(Boolean)
-    .filter(t => !STOPWORDS.has(t));
-}
-
-function ngrams(tokens, maxN=3) {
-  const out = [];
-  for (let i=0;i<tokens.length;i++){
-    for (let n=1;n<=maxN;n++){
-      if (i+n>tokens.length) break;
-      const gram = tokens.slice(i,i+n).join(" ");
-      out.push(gram);
-    }
-  }
-  return out;
-}
-
-function isValidGram(g) {
-  if (!g) return false;
-  const clean = g.replace(/[\.]+$/,'');
-  if (/^[0-9]+$/.test(clean)) return false; // pure numbers
-  if (/^[a-z]$/.test(clean)) return false;  // single letter
-  // single-word grams only if in whitelist
-  if (!clean.includes(" ")) {
-    return clean.length >= 3 && SINGLE_WORD_WHITELIST.has(clean);
-  }
-  return true; // allow bigrams/trigrams
-}
-
-function canonical(term) {
-  term = term.toLowerCase();
-  for (const canon of CANON_KEYS) {
-    if (term === canon) return canon;
-    if ((SYNONYMS[canon] || []).includes(term)) return canon;
-  }
-  return term;
-}
-
-function mineJDTerms(jdRaw) {
-  const lines = jdRaw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-  let weightMap = new Map();
-
-  const titleLine = lines[0] || "";
-  const sections = lines.map((line, idx) => {
-    if (idx === 0) return { text: line, base: 3 };
-    if (JD_REQ_HINTS.test(line))  return { text: line, base: 3 };
-    if (JD_RESP_HINTS.test(line)) return { text: line, base: 2 };
-    if (JD_NICE_HINTS.test(line)) return { text: line, base: 1 };
-    return { text: line, base: 2 };
-  });
-
-  for (const { text, base } of sections) {
-    const toks = tokenize(text);
-    const grams = ngrams(toks, 3); // 1–3 grams
-    const local = new Map();
-    for (const g of grams) {
-      if (!isValidGram(g)) continue;
-      const canon = canonical(g);
-      local.set(canon, (local.get(canon) || 0) + 1);
-    }
-    for (const [term, freq] of local) {
-      const add = base * (1 + Math.log(1 + freq));
-      weightMap.set(term, (weightMap.get(term) || 0) + add);
-    }
-  }
-
-  // Boost title terms
-  for (const t of ngrams(tokenize(titleLine), 3)) {
-    if (!isValidGram(t)) continue;
-    const can = canonical(t);
-    weightMap.set(can, (weightMap.get(can) || 0) + 1.5);
-  }
-
-  // Prefer phrases, keep stronger signals
-  let arr = Array.from(weightMap.entries())
-    .map(([term, w]) => ({ term, weight: w, n: term.split(" ").length }))
-    .filter(x => x.weight > 0.6) // was 1.2
-    .sort((a,b)=> (b.n - a.n) || (b.weight - a.weight));
-
-  // cap to top 60 terms
-  arr = arr.slice(0, 60);
-
-  // Band weights to {3,2,1} by quantiles
-  const ws = arr.map(x=>x.weight);
-  const q66 = quantile(ws, 0.66), q33 = quantile(ws, 0.33);
-  for (const x of arr) x.weight = x.weight >= q66 ? 3 : (x.weight >= q33 ? 2 : 1);
-
-  // Dedup canonically
-  const seen = new Set(); const out = [];
-  for (const x of arr) {
-    const k = x.term;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push({ term: k, weight: x.weight });
-  }
-  out.sort((a,b)=> b.weight - a.weight || a.term.localeCompare(b.term));
-  return out;
-}
-
-/* =========================
-   Deterministic scoring
-   ========================= */
-
-const ACTION_VERBS = ["Led","Designed","Implemented","Optimized","Launched","Improved","Partnered","Migrated","Refactored","Streamlined","Built","Owned","Drove","Shipped"];
-const METRIC_RE = /\b(\d+(\.\d+)?\s?%|\$\d+(?:\.\d+)?|[0-9]+(?:k|m)?\s?(users|requests|sessions|teams|clients|leads|revenue|ms|s))\b/i;
-const PLACEHOLDER_METRIC_RE = /\[(metric|impact|result)s?\]/i;
-
-function scoreResume(resumeRaw, jdTerms) {
-  const resume = resumeRaw || "";
-  const norm = resume.toLowerCase();
-  const sections = splitResumeSections(resume);
-  const totalWords = resume.split(/\s+/).filter(Boolean).length;
-
-  // Coverage 70
-  const W = jdTerms.reduce((s,k)=>s + mapWeight70(k.weight), 0) || 1;
-  let M = 0;
-  const perTermScore = {};
-  for (const t of jdTerms) {
-    const ms = matchScore(norm, t.term);
-    perTermScore[t.term] = ms;
-    M += mapWeight70(t.weight) * ms;
-  }
-  let coverage = 70 * (M / W);
-  if (totalWords > 1200) coverage = Math.max(0, coverage - 2);
-
-  // Placement 15 (distinct terms per section)
-  const dSummary = distinctHits(sections.summary, jdTerms).size;
-  const dRoles   = distinctHits(sections.roles,   jdTerms).size;
-  const dSkills  = distinctHits(sections.skills,  jdTerms).size;
-
-  const pSummary = 5 * Math.min(1, dSummary / 3);
-  const pRoles   = 7 * Math.min(1, dRoles   / 10);
-  const pSkills  = 3 * Math.min(1, dSkills  / 10);
-
-  let placement = pSummary + pRoles + pSkills;
-  const totalDistinct = Math.max(1, dSummary + dRoles + dSkills);
-  if (dSkills >= 0.6 * totalDistinct) placement = Math.min(placement, 7);
-
-  // Context 15 (Experience sentences with verbs + metrics)
-  let contextPts = 0;
-  for (const s of splitSentences(sections.roles)) {
-    const sLower = s.toLowerCase();
-    const hasKW = jdTerms.some(t => phraseIn(sLower, t.term));
-    if (!hasKW) continue;
-    const hasVerb = ACTION_VERBS.some(v => new RegExp(`\\b${escapeRe(v.toLowerCase())}\\b`).test(sLower));
-    if (hasVerb) contextPts += 1;
-    if (hasVerb && (METRIC_RE.test(s) || PLACEHOLDER_METRIC_RE.test(s))) contextPts += 1;
-    if (contextPts >= 15) break;
-  }
-  const context = Math.min(15, contextPts);
-
-  // Penalties ≤10
-  let penalty = 0;
-  for (const t of jdTerms) {
-    const re = new RegExp(`\\b${escapeRe(t.term)}\\b`, "gi");
-    const count = (resume.match(re)||[]).length;
-    if (count > 3) penalty += 1;
-  }
-  penalty = Math.min(10, penalty);
-
-  const total = clamp0_100(round1(coverage + placement + context - penalty));
-  const missing = jdTerms
-    .map(t => ({...t, ms: perTermScore[t.term] ?? 0}))
-    .filter(x => x.ms < 1.0) // not exact yet
-    .sort((a,b)=> (b.weight - a.weight) || (a.ms - b.ms) || a.term.localeCompare(b.term));
-
-  return {
-    total,
-    breakdown: { coverage: round1(coverage), placement: round1(placement), context: round1(context), penalty },
-    perTermScore,
-    sectionDistinct: { summary: dSummary, roles: dRoles, skills: dSkills },
-    contextPts,
-    missing
-  };
-}
-
-function mapWeight70(w){ return w === 3 ? 3 : w === 2 ? 2 : 1; }
-function distinctHits(sectionText, jdTerms) {
-  const out = new Set();
-  const s = (sectionText || "").toLowerCase();
-  for (const t of jdTerms) if (phraseIn(s, t.term)) out.add(t.term);
-  return out;
-}
-
-function matchScore(resumeLower, term) {
-  if (phraseIn(resumeLower, term)) return 1.0; // exact n-gram
-  for (const canon of CANON_KEYS) {
-    if (term === canon) {
-      const syns = SYNONYMS[canon];
-      if (syns.some(s => phraseIn(resumeLower, s))) return 0.85; // synonym close to full credit
-    }
-  }
-  const head = headWord(term);
-  const stemRe = new RegExp(`\\b${escapeRe(head)}(s|es|ing|ed)?\\b`, "i");
-  if (stemRe.test(resumeLower)) return 0.6;
-  return 0;
-}
-
-/* =========================
-   Greedy plan to reach 95 (slightly more aggressive)
-   ========================= */
-
-function planTo95(jdTerms, scored, target = 95) {
-  let projected = scored.total;
-  let counts = { ...scored.sectionDistinct }; // {summary, roles, skills}
-  let contextPts = scored.contextPts;
-  const W = jdTerms.reduce((s,k)=>s + mapWeight70(k.weight), 0) || 1;
-
-  const missing = jdTerms
-    .map(t => ({...t, ms: scored.perTermScore[t.term] ?? 0}))
-    .filter(x => x.ms < 1.0);
-
-  const items = [];
-  const maxAdds = 20; // was 16
-
-  const placementScore = (c) => {
-    let pS = 5 * Math.min(1, c.summary / 3);
-    let pR = 7 * Math.min(1, c.roles   / 10);
-    let pK = 3 * Math.min(1, c.skills  / 10);
-    let p   = pS + pR + pK;
-    const totalDistinct = Math.max(1, c.summary + c.roles + c.skills);
-    if (c.skills >= 0.6 * totalDistinct) p = Math.min(p, 7);
-    return p;
-  };
-  let basePlacement = placementScore(counts);
-
-  for (const m of missing) {
-    if (items.length >= maxAdds || projected >= target) break;
-
-    // Coverage delta if we make it exact once
-    const covDelta = 70 * ((mapWeight70(m.weight) * (1.0 - m.ms)) / W);
-
-    // Try each target section and pick best marginal gain
-    const choices = ["roles","summary","skills"];
-    let best = { section: "roles", gain: -1, placementDelta: 0, contextDelta: 0 };
-
-    for (const sec of choices) {
-      const nextCounts = { ...counts };
-      // Treat as adding a new distinct term in that section
-      nextCounts[sec] = nextCounts[sec] + 1;
-
-      const newPlacement = placementScore(nextCounts);
-      const placementDelta = newPlacement - basePlacement;
-
-      // Context grows only if adding to roles; assume +2 (verb + metric) if headroom
-      const contextDelta = sec === "roles" ? Math.min(2, Math.max(0, 15 - contextPts)) : 0;
-
-      const totalGain = covDelta + placementDelta + contextDelta;
-      if (totalGain > best.gain) best = { section: sec, gain: totalGain, placementDelta, contextDelta };
-    }
-
-    items.push({
-      term: m.term,
-      weight: m.weight,
-      target: best.section,
-      covDelta: round1(covDelta),
-      placeDelta: round1(best.placementDelta),
-      ctxDelta: best.contextDelta
-    });
-
-    // Update projected state
-    counts[best.section] += 1;
-    basePlacement += best.placementDelta;
-    if (best.section === "roles") contextPts = Math.min(15, contextPts + best.contextDelta);
-    projected = round1(projected + covDelta + best.placementDelta + best.contextDelta);
-  }
-
-  // Ensure Summary gets 2–4 of the top-weight items if underrepresented
-  const needSummary = Math.max(0, 2 - items.filter(i => i.target === "summary").length);
-  if (needSummary > 0) {
-    let switched = 0;
-    for (const it of items) {
-      if (switched >= needSummary) break;
-      if (it.target === "roles" && it.weight >= 2) { it.target = "summary"; switched++; }
-    }
-  }
-
-  return { items, projected };
-}
-
-/* =========================
-   OpenAI rewrite (single pass)
-   ========================= */
-
-async function openaiRewrite({ resumeV1, jd, plan }) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
-
-  const content = [
-`ROLE / JD (truncated):
-${jd}
-
-KEYWORDS TO WEAVE (target section):
-${plan.map(p => `- ${p.term} → ${p.target}`).join("\n")}
-
-INSTRUCTIONS:
-- Rewrite the resume so these keywords appear naturally and meaningfully.
-- Place terms per target section:
-  • Summary: highlights of the career (3-5 bullet points)
-  • Experience (roles): add or edit bullets; each bullet uses an action verb and includes a concrete metric or a [metric] placeholder.
-  • Skills: add remaining terms to a flat list; no duplicates, no stacking variants (e.g., "React" vs "React.js" → pick one).
-- Keep facts plausible. Do NOT invent employers, dates, or degrees. Do NOT change job titles wildly.
-- Match tone of the original v1 resume. Avoid keyword dumping. Keep total under ~900 words.
-- Output ONLY the rewritten resume text (no markdown, no commentary).
-
-RESUME V1:
-${resumeV1}`
-  ].join("\n");
-
-  const body = {
-    model: OPENAI_MODEL,
-    temperature: 0,
-    messages: [
-      { role: "system", content: "You are a precise resume rewriter that follows instructions exactly." },
-      { role: "user", content }
-    ]
-  };
-
-  try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal
-    });
-    clearTimeout(timeout);
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      throw new Error(`OpenAI ${res.status}: ${txt}`);
-    }
-    const data = await res.json();
-    return (data.choices?.[0]?.message?.content || "").trim();
-  } catch (err) {
-    clearTimeout(timeout);
-    if (err.name === "AbortError") return ""; // let caller handle retry via second click
-    throw err;
-  }
-}
-
-/* =========================
-   Resume section helpers
-   ========================= */
-
-function splitResumeSections(raw) {
-  const lower = (raw || "").toLowerCase();
-  const idxSkills = lower.search(/(?:^|\n)\s*(skills?|tooling|technologies)\s*[:\n]/);
-  const idxExp    = lower.search(/(?:^|\n)\s*(experience|work experience|employment|roles|career)\s*[:\n]/);
-  const idxSummary= lower.search(/(?:^|\n)\s*(summary|objective|profile|about)\s*[:\n]/);
-  let summary = "", roles = "", skills = "";
-
-  if (idxSummary >= 0) {
-    const end = idxExp >= 0 ? idxExp : (idxSkills >= 0 ? idxSkills : raw.length);
-    summary = raw.slice(idxSummary, end).replace(/^(summary|objective|profile|about)\s*[:\n]*/i,"").trim();
-  }
-  if (idxExp >= 0) {
-    const end = idxSkills >= 0 ? idxSkills : raw.length;
-    roles = raw.slice(idxExp, end).replace(/^(experience|work experience|employment|roles|career)\s*[:\n]*/i,"").trim();
-  } else {
-    const end = idxSkills >= 0 ? idxSkills : raw.length;
-    roles = raw.slice(0, end).trim();
-  }
-  if (idxSkills >= 0) {
-    skills = raw.slice(idxSkills).replace(/^(skills?|tooling|technologies)\s*[:\n]*/i,"").trim();
-  }
-  return { summary, roles, skills };
-}
-
-/* =========================
-   Text + generic helpers
-   ========================= */
-
-function phraseIn(textLower, phrase) {
-  return new RegExp(`\\b${escapeRe(phrase.toLowerCase())}\\b`).test(textLower);
-}
-function splitSentences(s) {
-  return (s || "")
-    .split(/\n+|(?<=\.)\s+(?=[A-Z])/g)
-    .map(t => t.trim())
     .filter(Boolean);
 }
-function headWord(term) {
-  return (term.split(/\s+/)[0] || "").toLowerCase();
+
+function extractKeywords(jd){
+  const toks = tokenize(jd).filter(t => !STOPWORDS.has(t));
+  const freq = new Map();
+  for(const t of toks){ freq.set(t, (freq.get(t)||0) + 1); }
+  const sorted = [...freq.entries()].sort((a,b)=>b[1]-a[1]).map(([t])=>t);
+  const required = new Set(sorted.slice(0, 40));
+  const nice = new Set(sorted.slice(40, 80));
+  const tech = new Set(sorted.filter(t => /[0-9/#.+\-]/.test(t) || t.length > 6).slice(0, 30));
+  return { required, nice, tech, all: new Set([...required, ...nice, ...tech]) };
 }
-function json(statusCode, obj) {
-  return { statusCode, headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) };
+
+function scoreText(text, jdKeywords, roleTerms=[]){
+  const tokens = new Set(tokenize(text));
+  const totalReq = jdKeywords.required.size || 1;
+  let coveredReq = 0;
+  for(const term of jdKeywords.required){ if(tokens.has(term)) coveredReq++; }
+
+  const niceTotal = jdKeywords.nice.size || 1;
+  let niceHit = 0;
+  for(const term of jdKeywords.nice){ if(tokens.has(term)) niceHit++; }
+
+  const roleTotal = roleTerms.length || 1;
+  let roleHit = 0;
+  for(const term of roleTerms){ if(tokens.has(term)) roleHit++; }
+
+  const techTotal = jdKeywords.tech.size || 1;
+  let techHit = 0;
+  for(const term of jdKeywords.tech){ if(tokens.has(term)) techHit++; }
+
+  let computed = (coveredReq/totalReq)*60 + (niceHit/niceTotal)*20 + (roleHit/roleTotal)*10 + (techHit/techTotal)*10;
+
+  // Overstuffing penalty (naive): >9 repeats of same token
+  const counts = {};
+  for(const t of tokenize(text)){ counts[t] = (counts[t]||0)+1; }
+  for(const [t,c] of Object.entries(counts)){
+    if(c > 9) computed -= Math.min(5, c-9);
+  }
+  return Math.max(0, Math.min(100, computed));
 }
-function escapeRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
-function round1(n){ return Math.round(n*10)/10; }
-function clamp0_100(n){ return Math.max(0, Math.min(100, n)); }
-function quantile(arr, q){
-  if (!arr.length) return 0;
-  const a = [...arr].sort((x,y)=>x-y);
-  const pos = (a.length - 1) * q;
-  const base = Math.floor(pos);
-  const rest = pos - base;
-  if (a[base+1] !== undefined) return a[base] + rest * (a[base+1] - a[base]);
-  return a[base];
+
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function boldAddedKeywords(v1, v2, jdKeywords){
+  const v1Set = new Set(tokenize(v1));
+  const target = new Set([...jdKeywords.all].filter(t => !v1Set.has(t)));
+  if (target.size === 0) return escapeHtml(v2);
+  const esc = escapeHtml(v2);
+  const sorted = [...target].sort((a,b)=>b.length-a.length).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (sorted.length === 0) return esc;
+  const re = new RegExp(`\\b(${sorted.join('|')})\\b`, 'gi');
+  return esc.replace(re, (m) => `**${m}**`);
 }
-function truncate(s, max){ s = String(s||""); return s.length > max ? s.slice(0, max) : s; }
+
+function atsGuidelines(){
+  // Generic ATS-friendly structure
+  return { sectionHeaders: ['Objective','Skills','Experience','Education'] };
+}
+
+// --- OpenAI rewrite loop ---
+async function rewriteOnce({resume, jd, jdKeywords}){
+  const guide = atsGuidelines();
+  const sys = `You are an expert resume editor for ATS. Do not invent employers, dates, or degrees. You may add keywords into objective, skills, and bullet responsibilities. Keep text truthful and concise. Use plain text with clear section headers that the ATS recognizes: ${guide.sectionHeaders.join(', ')}. Keep bullets concise. Avoid keyword stuffing; spread terms in objective, skills, and bullets.`;
+
+  const user = [
+    `JOB DESCRIPTION:\n${jd}\n`,
+    `CURRENT RESUME:\n${resume}\n`,
+    `TARGET KEYWORDS (sample): ${[...jdKeywords.required].slice(0,20).join(', ')}\n`,
+    `REWRITE GOAL:\n- Improve match and reach >=95 proxy score\n- Keep titles, chronology, achievements\n- Add missing JD keywords naturally where relevant\n- Do not fabricate employers, dates, or education\n- Output plain text resume with sections in this order: ${guide.sectionHeaders.join(' > ')}\n`
+  ].join('\n');
+
+  const completion = await client.chat.completions.create({
+    model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+    temperature: 0.2,
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: user }
+    ]
+  });
+
+  return completion.choices?.[0]?.message?.content?.trim() || "";
+}
+
+export async function handler(event){
+  try{
+    if(event.httpMethod !== 'POST'){
+      return { statusCode: 405, body: 'Method Not Allowed' };
+    }
+    const { resume, jd } = JSON.parse(event.body||'{}');
+    if(!resume || !jd){
+      return { statusCode: 400, body: JSON.stringify({ error: "Missing resume or jd" }) };
+    }
+
+    const jdKeywords = extractKeywords(jd);
+    const roleTerms = ['lead','senior','staff','designer','product','ux','ui','system','strategy'];
+
+    // Score v1
+    const scoreV1 = scoreText(resume, jdKeywords, roleTerms);
+
+    // Iterate up to 3 times to reach >=95
+    let v2Text = "";
+    let scoreV2 = 0;
+    let attempt = 0;
+    let input = resume;
+
+    while(attempt < 3){
+      attempt++;
+      const draft = await rewriteOnce({ resume: input, jd, jdKeywords });
+      v2Text = draft || input;
+      scoreV2 = scoreText(v2Text, jdKeywords, roleTerms);
+
+      // anti-stuffing: if adding keywords tank readability (heuristic), trim repeated lines
+      if (scoreV2 < 95){
+        // remove duplicate consecutive lines as a small cleanup
+        const lines = v2Text.split(/\r?\n/);
+        const cleaned = lines.filter((l,i,arr)=> i===0 || l.trim() !== arr[i-1].trim()).join('\n');
+        input = cleaned;
+      } else {
+        break;
+      }
+    }
+
+    const boldedV2 = boldAddedKeywords(resume, v2Text, jdKeywords);
+
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ v2Text, scoreV1, scoreV2, boldedV2, attempts: attempt })
+    };
+  } catch (err){
+    console.error(err);
+    return { statusCode: 500, body: JSON.stringify({ error: err.message || String(err) }) };
+  }
+}
