@@ -1,8 +1,11 @@
 {
-  "name": "ats-optimizer",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "openai": "^4.58.1"
-  }
+"name": "ai-resume-optimizer",
+"version": "1.0.0",
+"description": "A web app to tailor a resume to a job description using AI.",
+"main": "index.html",
+"scripts": {
+"test": "echo 'Error: no test specified' && exit 1"
+},
+"author": "",
+"license": "ISC"
 }

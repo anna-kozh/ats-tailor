@@ -1,72 +1,179 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ATS Rewrite to 95% — OpenAI + Proxy Score</title>
-  <style>
-    :root {
-      --bg:#0b0c10; --card:#15171c; --ink:#e8eaed; --muted:#9aa0a6; --accent:#7aa6ff;
-    }
-    *{box-sizing:border-box}
-    body{margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background:var(--bg); color:var(--ink);}
-    header{padding:20px 16px; display:flex; gap:12px; align-items:center; border-bottom:1px solid #262a33}
-    header h1{font-size:18px; margin:0}
-    main{max-width:1100px; margin:0 auto; padding:16px; display:grid; grid-template-columns:1fr; gap:16px}
-    @media(min-width:1000px){ main{grid-template-columns:1fr 1fr} }
-    .card{background:var(--card); border:1px solid #262a33; border-radius:16px; padding:14px; box-shadow:0 1px 8px rgba(0,0,0,.35)}
-    textarea{width:100%; min-height:280px; background:#0f1115; color:var(--ink); border:1px solid #2b2f38; border-radius:12px; padding:12px; resize:vertical; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace}
-    label{display:block; font-weight:600; margin-bottom:8px}
-    .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
-    button{border:0; background:var(--accent); color:#0b0c10; padding:12px 16px; border-radius:12px; font-weight:700; cursor:pointer}
-    button[disabled]{opacity:.5; cursor:wait}
-    .small{font-size:12px; color:var(--muted)}
-    .scores{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
-    .pill{padding:6px 10px; border-radius:999px; font-weight:700; font-size:12px; border:1px solid #2b2f38}
-    .pill.ok{background:rgba(34,197,94,.12); color:#86efac; border-color:rgba(34,197,94,.35)}
-    .pill.warn{background:rgba(245,158,11,.12); color:#fde68a; border-color:rgba(245,158,11,.35)}
-    .pill.bad{background:rgba(239,68,68,.12); color:#fecaca; border-color:rgba(239,68,68,.35)}
-    .out{white-space:pre-wrap; background:#0f1115; padding:12px; border-radius:12px; border:1px solid #2b2f38; min-height:280px}
-    .muted{color:var(--muted)}
-    .spinner{display:inline-block; width:16px; height:16px; border:2px solid #ffffff40; border-top-color:#fff; border-radius:50%; animation:spin 1s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .section-title{font-weight:700; margin:8px 0 4px 0; font-size:13px; color:#b6c3ff}
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Resume Optimizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; } /* gray-800 */
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; } /* gray-600 */
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; } /* gray-500 */
+        .ai-output-container pre { white-space: pre-wrap; word-wrap: break-word; }
+        #loader svg { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    </style>
 </head>
-<body>
-  <header>
-    <h1>ATS Rewrite → 95% (OpenAI + Proxy Score)</h1>
-    <div class="small">Paste resume and JD. One click. OpenAI rewrites, our simulator scores.</div>
-  </header>
+<body class="bg-gray-900 text-gray-200 min-h-screen flex items-center justify-center p-4">
+    <div class="w-full max-w-6xl mx-auto bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8">
 
-  <main>
-    <section class="card">
-      <label for="resume">Resume v1 (paste plain text)</label>
-      <textarea id="resume" placeholder="Paste your resume text..."></textarea>
-      <div class="small">Tip: keep it under ~1200 words for best results.</div>
-    </section>
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-white">AI Resume Optimizer</h1>
+            <p class="text-gray-400 mt-2">Tailor your resume to any job description in seconds.</p>
+        </div>
 
-    <section class="card">
-      <label for="jd">Job Description</label>
-      <textarea id="jd" placeholder="Paste the full JD..."></textarea>
-    </section>
+        <!-- Main Content Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Left Column: Inputs -->
+            <div class="flex flex-col gap-6">
+                <div>
+                    <label for="resume-input" class="block text-sm font-medium text-gray-300 mb-2">Your Current Resume</label>
+                    <textarea id="resume-input" rows="18" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 text-sm text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow duration-200" placeholder="Paste your entire resume here..."></textarea>
+                </div>
+                <div>
+                    <label for="job-desc-input" class="block text-sm font-medium text-gray-300 mb-2">Job Description</label>
+                    <textarea id="job-desc-input" rows="18" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 text-sm text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow duration-200" placeholder="Paste the job description you are targeting..."></textarea>
+                </div>
+            </div>
 
-    <section class="card" style="grid-column:1/-1">
-      <div class="row">
-        <button id="rewriteBtn">Rewrite</button>
-        <div id="status" class="small muted"></div>
-      </div>
-      <div style="height:8px"></div>
-      <div class="scores">
-        <div id="scoreV1" class="pill bad">v1: —</div>
-        <div id="scoreV2" class="pill bad">v2: —</div>
-      </div>
-      <div style="height:12px"></div>
-      <div class="section-title">Rewritten Resume v2</div>
-      <div id="v2" class="out muted">—</div>
-    </section>
-  </main>
+            <!-- Right Column: Output -->
+            <div class="flex flex-col">
+                <div class="flex justify-between items-center mb-2">
+                    <label for="output-container" class="block text-sm font-medium text-gray-300">Optimized Resume</label>
+                    <button id="copy-btn" class="text-sm bg-gray-600 hover:bg-gray-500 text-white font-semibold py-1 px-3 rounded-md transition-colors duration-200 hidden">
+                        Copy
+                    </button>
+                </div>
+                <div id="output-container" class="w-full h-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-sm ai-output-container overflow-y-auto">
+                    <div id="placeholder" class="text-gray-500 h-full flex items-center justify-center">
+                        Your tailored resume will appear here...
+                    </div>
+                     <div id="loader" class="hidden h-full flex flex-col items-center justify-center text-center">
+                        <svg class="h-8 w-8 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <p class="mt-4 text-gray-400">Optimizing... this may take a moment.</p>
+                    </div>
+                    <pre id="result" class="text-gray-200"></pre>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Action Button -->
+        <div class="mt-6 text-center">
+            <button id="generate-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-lg transition-transform transform hover:scale-105 duration-200 shadow-lg">
+                Optimize My Resume
+            </button>
+        </div>
+        
+        <!-- Error Message Box -->
+        <div id="error-box" class="hidden mt-4 bg-red-900 border border-red-700 text-red-200 px-4 py-3 rounded-lg relative" role="alert">
+            <strong class="font-bold">Error:</strong>
+            <span id="error-message" class="block sm:inline"></span>
+        </div>
+    </div>
 
-  <script src="./js/main.js"></script>
+    <script>
+        const resumeInput = document.getElementById('resume-input');
+        const jobDescInput = document.getElementById('job-desc-input');
+        const generateBtn = document.getElementById('generate-btn');
+        const placeholder = document.getElementById('placeholder');
+        const loader = document.getElementById('loader');
+        const resultPre = document.getElementById('result');
+        const copyBtn = document.getElementById('copy-btn');
+        const errorBox = document.getElementById('error-box');
+        const errorMessage = document.getElementById('error-message');
+
+        generateBtn.addEventListener('click', optimizeResume);
+        copyBtn.addEventListener('click', copyToClipboard);
+
+        async function optimizeResume() {
+            const resumeText = resumeInput.value.trim();
+            const jobDescription = jobDescInput.value.trim();
+
+            if (!resumeText || !jobDescription) {
+                showError("Please paste your resume and the job description.");
+                return;
+            }
+            
+            hideError();
+            setLoadingState(true);
+
+            try {
+                // Call our own secure serverless function
+                const response = await fetch('/.netlify/functions/optimize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ resumeText, jobDescription })
+                });
+                
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'The optimization request failed.');
+                }
+                
+                const optimizedResume = data.choices[0].message.content;
+
+                resultPre.textContent = optimizedResume;
+                copyBtn.classList.remove('hidden');
+
+            } catch (error) {
+                console.error("Error:", error);
+                showError(error.message);
+                placeholder.classList.remove('hidden');
+            } finally {
+                setLoadingState(false);
+            }
+        }
+
+        function setLoadingState(isLoading) {
+            if (isLoading) {
+                placeholder.classList.add('hidden');
+                resultPre.textContent = '';
+                loader.classList.remove('hidden');
+                copyBtn.classList.add('hidden');
+                generateBtn.disabled = true;
+                generateBtn.textContent = 'Generating...';
+                generateBtn.classList.remove('hover:scale-105', 'bg-blue-600', 'hover:bg-blue-700');
+                generateBtn.classList.add('bg-gray-600', 'cursor-not-allowed');
+            } else {
+                loader.classList.add('hidden');
+                generateBtn.disabled = false;
+                generateBtn.textContent = 'Optimize My Resume';
+                generateBtn.classList.add('hover:scale-105', 'bg-blue-600', 'hover:bg-blue-700');
+                generateBtn.classList.remove('bg-gray-600', 'cursor-not-allowed');
+            }
+        }
+
+        function copyToClipboard() {
+            const textToCopy = resultPre.textContent;
+            if (!textToCopy) return;
+            
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+                showError('Could not copy text to clipboard.');
+            });
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorBox.classList.remove('hidden');
+        }
+
+        function hideError() {
+            errorBox.classList.add('hidden');
+        }
+    </script>
 </body>
 </html>
