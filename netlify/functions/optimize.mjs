@@ -16,28 +16,27 @@ exports.handler = async function(event) {
     if (!apiKey) return { statusCode: 500, body: JSON.stringify({ error: 'OpenAI API key is not configured.' }) };
 
     try {
-        const { resumeText: masterInventory, jobDescription } = JSON.parse(event.body);
+        const { resumeText: masterInventory, jobDescription, companyValues } = JSON.parse(event.body);
         if (!masterInventory || !jobDescription) {
             return { statusCode: 400, body: JSON.stringify({ error: 'Experience Inventory and Job Description are required.' }) };
         }
 
-        const systemPrompt = `You are an AI-powered resume optimization agent. Your goal is to produce a final, highly-optimized resume that achieves a near-perfect score.
+        const systemPrompt = `You are an AI-powered executive career strategist and resume writer. Your mission is to create a resume that is not just technically aligned, but also deeply resonant with the target company's culture and values, aiming for a 95%+ alignment score.
 
-You will perform the following steps internally:
-1.  **Analyze & Identify Keywords:** First, identify the top 15 most important keywords and concepts from the provided job description.
-2.  **Create First Draft:** Based on the user's full Experience Inventory, create a strong first draft of a resume tailored to the job description.
-3.  **Self-Critique:** Ruthlessly analyze your own first draft against the keywords. Identify the 2-3 weakest points where the resume lacks impact or metric-driven results. Then, find stronger, more quantifiable accomplishments from the FULL Experience Inventory that would be a better fit.
-4.  **Final Rewrite:** Generate the final, polished resume by incorporating the improvements from your self-critique.
+You will perform the following steps internally in a single thought process:
+1.  **Holistic Analysis:** Analyze the Job Description for explicit skills and implicit needs. If provided, analyze the Company Values to understand their core DNA, mission, and operating principles. Synthesize these into a "Target Candidate Profile."
+2.  **Keyword Extraction:** Based on the profile, identify the top 15 most critical keywords.
+3.  **Strategic Narrative Draft:** Review the user's entire Experience Inventory. Create a first draft of a resume that tells a compelling story, positioning the user as the perfect fit for the Target Candidate Profile.
+4.  **Ruthless Self-Critique:** Analyze your own first draft. Where is it weak? Does it sound generic? Does it lack quantifiable impact? Identify the 2-3 points that could be stronger by pulling more specific, metric-driven examples from the full Experience Inventory.
+5.  **Cultural Infusion & Final Polish:** Rewrite the draft to incorporate the improvements from your critique. If company values were provided, subtly weave their specific language and tone into the resume. The summary should echo their mission. Achievements should reflect their operating principles (e.g., if they value 'shipping fast', highlight projects that accelerated delivery). This is the key to a 95%+ score.
 
-You MUST return your final output as a single, clean JSON object with no other text. The JSON object must have this exact structure:
+You MUST return your final output as a single, clean JSON object. The structure must be:
 {
   "keywords": ["..."],
-  "originalScore": ...,
-  "optimizedScore": ...,
   "optimizedResume": "..."
 }`;
 
-        const userPrompt = `**JOB DESCRIPTION:**\n${jobDescription}\n\n---\n\n**EXPERIENCE INVENTORY:**\n${masterInventory}`;
+        const userPrompt = `**JOB DESCRIPTION:**\n${jobDescription}\n\n---\n\n**COMPANY VALUES & CULTURE:**\n${companyValues || 'Not provided.'}\n\n---\n\n**CANDIDATE'S EXPERIENCE INVENTORY:**\n${masterInventory}`;
         
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
@@ -48,7 +47,7 @@ You MUST return your final output as a single, clean JSON object with no other t
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: userPrompt }
                 ],
-                temperature: 0.5,
+                temperature: 0.4,
                 response_format: { type: "json_object" }
             })
         });
@@ -61,8 +60,7 @@ You MUST return your final output as a single, clean JSON object with no other t
 
         const data = await response.json();
         const content = JSON.parse(data.choices[0].message.content);
-
-        // We need to re-calculate the scores here to ensure they are accurate and not hallucinated by the AI.
+        
         const keywords = content.keywords || [];
         const finalResume = content.optimizedResume || "";
 
