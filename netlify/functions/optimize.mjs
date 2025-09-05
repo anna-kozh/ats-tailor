@@ -64,7 +64,7 @@ exports.handler = async function(event) {
         **NON-NEGOTIABLE RULES:**
         1.  **PRESERVE FACTS:** You must parse the inventory to identify distinct jobs. For each, you MUST preserve the original \`company\`, \`role\`, and \`dates\` EXACTLY as they appear. DO NOT alter them.
         2.  **FOCUS ON ACCOMPLISHMENTS:** Your creative work is strictly confined to rewriting accomplishment bullet points to align with the job description and keywords.
-        3.  **BULLET POINTS - WORD COUNT:** Freelance (25-30 words), Simpology (60-70 words), SkoolBag (60-80 words), ASG GROUP (less than 20 words), VoiceBox (less than 20 words)
+        3.  **BULLET POINTS - WORD COUNT:** Freelance (30-40 words), Simpology (70-80 words), SkoolBag (60-80 words), ASG GROUP (less than 20 words), VoiceBox (less than 20 words)
         4. **CREATE A SKILLS SECTION:** After Work Experience, add a 'Skills' section with the most relevant skills.
         5.  **ENFORCE WORD LIMITS:** To ensure the resume fits on one page, you MUST adhere to these strict limits:
         6.  **Professional Summary:** Maximum 65 words and 3 bullet points.
