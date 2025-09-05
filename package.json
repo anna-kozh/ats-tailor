@@ -1,7 +1,7 @@
 {
-  "name": "ats-optimizer-fast",
-  "type": "module",
+  "name": "ats-optimizer",
   "private": true,
+  "type": "module",
   "dependencies": {
     "openai": "^4.58.1"
   }
