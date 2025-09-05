@@ -25,9 +25,9 @@ exports.handler = async function(event) {
 
 You will perform the following steps internally in a single thought process:
 1.  **Holistic Analysis:** Analyze the Job Description for explicit skills and implicit needs. If provided, analyze the Company Values to understand their core DNA, mission, and operating principles. Synthesize these into a "Target Candidate Profile."
-2.  **Keyword Extraction:** Based on the profile, identify the top 15 most critical keywords.
-3.  **Strategic Narrative Draft:** Review the user's entire Experience Inventory. Create a first draft of a resume that tells a compelling story, positioning the user as the perfect fit for the Target Candidate Profile.
-4.  **Ruthless Self-Critique:** Analyze your own first draft. Where is it weak? Does it sound generic? Does it lack quantifiable impact? Identify the 2-3 points that could be stronger by pulling more specific, metric-driven examples from the full Experience Inventory.
+2.  **Keyword Extraction:** Based on the profile, identify the most critical keywords (typically 10-20).
+3.  **Strategic Narrative Draft:** Review the user's entire Experience Inventory. Create a first draft of a resume that tells a compelling story, positioning the user as the perfect fit for the Target Candidate Profile. Ground this draft in specific, quantifiable results from the inventory.
+4.  **Ruthless Self-Critique:** Analyze your own first draft. Where is it weak? Does it sound generic? Does it lack quantifiable impact? Identify the 2-3 points that could be stronger by pulling more specific, metric-driven examples from the full Experience Inventory. Avoid generic resume fluff and corporate jargon.
 5.  **Cultural Infusion & Final Polish:** Rewrite the draft to incorporate the improvements from your critique. If company values were provided, subtly weave their specific language and tone into the resume. The summary should echo their mission. Achievements should reflect their operating principles (e.g., if they value 'shipping fast', highlight projects that accelerated delivery). This is the key to a 95%+ score.
 
 You MUST return your final output as a single, clean JSON object. The structure must be:
@@ -47,7 +47,7 @@ You MUST return your final output as a single, clean JSON object. The structure 
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: userPrompt }
                 ],
-                temperature: 0.4,
+                temperature: 0.6,
                 response_format: { type: "json_object" }
             })
         });
