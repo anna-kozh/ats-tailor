@@ -1,11 +1,12 @@
 // Netlify Function: rewrite (OpenAI rewrite + deterministic ATS scoring)
+// Fast path: one rewrite per request to avoid Netlify 504 timeouts.
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const MAX_PASSES = 1;        // was 3
+const OPENAI_TIMEOUT_MS = 8000; // hard cap per rewrite
 
 export async function handler(event) {
   try {
-    if (event.httpMethod !== "POST") {
-      return json(405, { error: "Use POST" });
-    }
+    if (event.httpMethod !== "POST") return json(405, { error: "Use POST" });
     const { resumeV1, jd } = JSON.parse(event.body || "{}");
     if (!resumeV1 || !jd) return json(400, { error: "Missing resumeV1 or jd" });
     if (!OPENAI_API_KEY) return json(500, { error: "Missing OPENAI_API_KEY env var" });
@@ -16,120 +17,120 @@ export async function handler(event) {
     // Score v1
     const s1 = sim.scoreResume(resumeV1, jdKeywords);
 
-    // Loop: ask OpenAI to rewrite → score → stop when >=95 or 3 passes
+    // One quick rewrite pass to stay under Netlify timeouts
     let current = resumeV1;
     let sCurr = s1;
     let passes = 0;
-    let lastMissing = sCurr.missing;
 
-    while (sCurr.total < 95 && passes < 3) {
+    if (sCurr.total < 95) {
       const missing = sCurr.missing.map(m => m.term);
-      const rewritten = await openaiRewrite(current, jd, missing);
-      if (!rewritten || rewritten.trim().length < 50) {
-        // avoid empty/garbage responses
-        break;
+      const rewritten = await openaiRewrite(
+        truncate(resumeV1, 2500),
+        truncate(jd, 2500),
+        missing
+      );
+      if (rewritten && rewritten.trim().length > 50) {
+        current = rewritten.trim();
+        sCurr = sim.scoreResume(current, jdKeywords);
+        passes = 1;
       }
-      current = rewritten.trim();
-      sCurr = sim.scoreResume(current, jdKeywords);
-      lastMissing = sCurr.missing;
-      passes++;
     }
-
-    const details = {
-      jdKeywords,
-      scoreV1_breakdown: s1.breakdown,
-      scoreV2_breakdown: sCurr.breakdown,
-      missing_after_v2: lastMissing,
-      passes
-    };
 
     return json(200, {
       scoreV1: s1.total,
       resumeV2: current,
       scoreV2: sCurr.total,
-      details
+      details: {
+        jdKeywords,
+        scoreV1_breakdown: s1.breakdown,
+        scoreV2_breakdown: sCurr.breakdown,
+        missing_after_v2: sCurr.missing,
+        passes
+      },
+      // If still <95, click Rewrite again (keeps requests fast, no 504s).
+      nextAction: sCurr.total >= 95 ? "done" : "rewrite_again"
     });
   } catch (e) {
     return json(500, { error: String(e?.message || e) });
   }
 }
 
-// ---------------- OpenAI call ----------------
-async function openaiRewrite(resumeV1, jd, missingTerms){
+// ---------------- OpenAI call with timeout ----------------
+async function openaiRewrite(resumeV1, jd, missingTerms) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
+
   const body = {
     model: "gpt-4o-mini",
     temperature: 0,
     messages: [
       {
         role: "system",
-        content: `You are a precise resume rewriter. Goal: weave the JD's missing keywords naturally across Summary (1-2 lines), Roles (bullet points with actions + impacts), and Skills (flat list). Keep facts plausible. Do not fabricate employers or degrees. Maintain senior tone. Avoid keyword dumping. Keep under ~900 words. Output ONLY the rewritten resume text, no markdown, no commentary.`
+        content:
+          "You are a precise resume rewriter. Goal: weave the JD's missing keywords naturally across Summary (1–2 lines), Roles (bullets with actions + impacts), and Skills (flat list). Keep facts plausible. Do not fabricate employers or degrees. Maintain senior tone. Avoid keyword dumping. Keep under ~900 words. Output ONLY the rewritten resume text, no markdown, no commentary."
       },
       {
         role: "user",
         content:
 `JOB DESCRIPTION:
-${truncate(jd, 4000)}
+${jd}
 
 MISSING KEYWORDS TO ADD (high priority first):
-${(missingTerms||[]).slice(0,20).join(", ") || "None"}
+${(missingTerms || []).slice(0, 20).join(", ") || "None"}
 
-RESUME V1 (rewrite this into V2  with the missing terms woven across sections):
-${truncate(resumeV1, 4000)}`
+RESUME V1 (rewrite this into V2 with the missing terms woven across sections):
+${resumeV1}`
       }
     ]
   };
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`OpenAI ${res.status}: ${txt}`);
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    clearTimeout(t);
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`OpenAI ${res.status}: ${txt}`);
+    }
+    const data = await res.json();
+    return (data.choices?.[0]?.message?.content || "").trim();
+  } catch (err) {
+    clearTimeout(t);
+    // If timeout/abort, return empty so UI can prompt a second click
+    if (err.name === "AbortError") return "";
+    throw err;
   }
-  const data = await res.json();
-  const text = data.choices?.[0]?.message?.content || "";
-  return text.trim();
 }
 
-function truncate(s, max){ s = String(s||""); return s.length>max ? s.slice(0,max) : s; }
+function truncate(s, max) { s = String(s || ""); return s.length > max ? s.slice(0, max) : s; }
 
 // ---------------- Utils ----------------
 function json(statusCode, obj) {
-  return {
-    statusCode,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(obj)
-  };
+  return { statusCode, headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) };
 }
 function splitSentences(s) {
-  return (s || "")
-    .split(/\n+|(?<=\.)\s+(?=[A-Z])/g)
-    .map(t => t.trim())
-    .filter(Boolean);
+  return (s || "").split(/\n+|(?<=\.)\s+(?=[A-Z])/g).map(t => t.trim()).filter(Boolean);
 }
-function uniq(arr){ return Array.from(new Set(arr)); }
-function round1(n){ return Math.round(n*10)/10; }
-function escapeRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function uniq(arr) { return Array.from(new Set(arr)); }
+function round1(n) { return Math.round(n * 10) / 10; }
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
 // ---------------- Lexicons ----------------
 const SKILL_LEXICON = [
-  // Design core
   "design system","design systems","design tokens","component library","figma","figjam",
   "user research","usability testing","accessibility","wcag","information architecture",
   "prototyping","interaction design","visual design","journey mapping",
   "a/b testing","experimentation","metrics","data-informed","product strategy",
-  // AI/agents
   "llm","large language model","prompt engineering","rag","agent","genai","ai ux","agentic ux",
-  // Frontend ecosystem (context)
   "react","next.js","typescript","javascript","tailwind","node.js",
-  // Platforms/process
   "jira","confluence","amplitude","mixpanel","segment",
-  // Reg/healthcare
   "hipaa","phi","soc 2","hl7","fhir"
 ];
 
@@ -155,14 +156,14 @@ const SYNONYMS = {
   "javascript": ["js"],
   "next.js": ["nextjs","next"],
   "hipaa": ["phi","health privacy"],
-  "soc 2": ["soc2"],
+  "soc 2": ["soc2"]
 };
 
 const ACTION_VERBS = ["Led","Designed","Implemented","Optimized","Launched","Improved","Partnered","Migrated","Refactored","Streamlined"];
 
 // ---------------- ATS Simulator ----------------
 class ATSSim {
-  extractKeywords(jdRaw){
+  extractKeywords(jdRaw) {
     const jd = jdRaw.toLowerCase();
     const buckets = { required: new Set(), core: new Set(), nice: new Set() };
     const reqCtx = /(must|required|need(ed)?|minimum|required qualifications)/;
@@ -212,7 +213,7 @@ class ATSSim {
     return out.sort((a,b)=>b.weight-a.weight || a.term.localeCompare(b.term));
   }
 
-  canonical(term){
+  canonical(term) {
     term = term.toLowerCase();
     for (const [canon, syns] of Object.entries(SYNONYMS)) {
       if (term === canon || syns.includes(term)) return canon;
@@ -220,7 +221,7 @@ class ATSSim {
     return term;
   }
 
-  matchScore(resumeRaw, keyword){
+  matchScore(resumeRaw, keyword) {
     const resume = resumeRaw.toLowerCase();
     if (resume.includes(keyword)) return 1.0;
     const syns = SYNONYMS[keyword] || [];
@@ -231,7 +232,7 @@ class ATSSim {
     return 0;
   }
 
-  splitSections(resumeRaw){
+  splitSections(resumeRaw) {
     const raw = resumeRaw;
     const lower = raw.toLowerCase();
     const findIdx = (r) => lower.search(r);
@@ -243,26 +244,26 @@ class ATSSim {
     let summary = "", roles = "", skills = "";
     if (idxSummary >= 0) {
       const end = idxExp >= 0 ? idxExp : (idxSkills >= 0 ? idxSkills : raw.length);
-      summary = raw.slice(idxSummary, end).replace(/^(summary|objective|profile|about)\s*[:\n]*/i,"").trim();
+      summary = raw.slice(idxSummary, end).replace(/^(summary|objective|profile|about)\s*[:\n]*/i, "").trim();
     }
     if (idxExp >= 0) {
       const end = idxSkills >= 0 ? idxSkills : raw.length;
-      roles = raw.slice(idxExp, end).replace(/^(experience|work experience|employment|roles|career)\s*[:\n]*/i,"").trim();
+      roles = raw.slice(idxExp, end).replace(/^(experience|work experience|employment|roles|career)\s*[:\n]*/i, "").trim();
     } else {
       const end = idxSkills >= 0 ? idxSkills : raw.length;
       roles = raw.slice(0, end).trim();
     }
     if (idxSkills >= 0) {
-      skills = raw.slice(idxSkills).replace(/^(skills?|tooling|technologies)\s*[:\n]*/i,"").trim();
+      skills = raw.slice(idxSkills).replace(/^(skills?|tooling|technologies)\s*[:\n]*/i, "").trim();
     }
     return { summary, roles, skills };
   }
 
-  scoreResume(resumeRaw, jdKeywords){
+  scoreResume(resumeRaw, jdKeywords) {
     const totalWords = resumeRaw.split(/\s+/).filter(Boolean).length;
     const { summary, roles, skills } = this.splitSections(resumeRaw);
 
-    const W = jdKeywords.reduce((s,k)=>s+k.weight, 0) || 1;
+    const W = jdKeywords.reduce((s, k) => s + k.weight, 0) || 1;
     let M = 0;
     const perTerm = {};
     for (const k of jdKeywords) {
@@ -273,30 +274,30 @@ class ATSSim {
     let coverage = 80 * (M / W);
     if (totalWords > 1200) coverage = Math.max(0, coverage - 2);
 
-    function distinctHits(section){
+    function distinctHits(section) {
       const sec = section.toLowerCase();
       const set = new Set();
       for (const k of jdKeywords) {
-        if (sec.includes(k.term) || (SYNONYMS[k.term]||[]).some(s=>sec.includes(s))) set.add(k.term);
+        if (sec.includes(k.term) || (SYNONYMS[k.term] || []).some(s => sec.includes(s))) set.add(k.term);
       }
       return set.size;
     }
     const needSummary = 3, needRoles = 8, needSkills = 8;
-    const dSummary = Math.min(1, distinctHits(summary)/needSummary);
-    const dRoles = Math.min(1, distinctHits(roles)/needRoles);
-    const dSkills = Math.min(1, distinctHits(skills)/needSkills);
-    let distribution = 10 * (0.25*dSummary + 0.5*dRoles + 0.25*dSkills);
+    const dSummary = Math.min(1, distinctHits(summary) / needSummary);
+    const dRoles = Math.min(1, distinctHits(roles) / needRoles);
+    const dSkills = Math.min(1, distinctHits(skills) / needSkills);
+    let distribution = 10 * (0.25 * dSummary + 0.5 * dRoles + 0.25 * dSkills);
 
     const totalDistinct = distinctHits(summary) + distinctHits(roles) + distinctHits(skills) || 1;
     const onlySkills = distinctHits(skills) >= (0.6 * totalDistinct);
     if (onlySkills) distribution = Math.min(distribution, 6);
 
-    const verbs = ACTION_VERBS.map(v=>v.toLowerCase());
+    const verbs = ACTION_VERBS.map(v => v.toLowerCase());
     let contextPoints = 0;
     const sentences = splitSentences(roles);
     for (const s of sentences) {
       const sLower = s.toLowerCase();
-      const hasKW = jdKeywords.some(k => sLower.includes(k.term) || (SYNONYMS[k.term]||[]).some(x=>sLower.includes(x)));
+      const hasKW = jdKeywords.some(k => sLower.includes(k.term) || (SYNONYMS[k.term] || []).some(x => sLower.includes(x)));
       if (!hasKW) continue;
       const hasVerb = verbs.some(v => new RegExp(`\\b${v.toLowerCase()}\\b`).test(sLower));
       if (hasVerb) contextPoints += 1;
@@ -309,13 +310,13 @@ class ATSSim {
     let penalty = 0;
     for (const k of jdKeywords) {
       const re = new RegExp(`\\b${escapeRe(k.term)}\\b`, "gi");
-      const count = (resumeRaw.match(re)||[]).length;
+      const count = (resumeRaw.match(re) || []).length;
       if (count > 3) penalty += 1;
     }
     penalty = Math.min(10, penalty);
 
     const total = Math.max(0, Math.min(100, round1(coverage + distribution + context - penalty)));
-    const missing = jdKeywords.filter(k => perTerm[k.term] < 1).sort((a,b)=>b.weight-a.weight);
+    const missing = jdKeywords.filter(k => perTerm[k.term] < 1).sort((a, b) => b.weight - a.weight);
 
     return {
       total,
@@ -324,5 +325,3 @@ class ATSSim {
     };
   }
 }
-
-// ---------------- netlify.toml & package will use Node 18+ ----------------
