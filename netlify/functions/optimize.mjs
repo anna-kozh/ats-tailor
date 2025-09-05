@@ -40,7 +40,7 @@ const callOpenAI = async (apiKey, systemPrompt, userPrompt, isJson = true) => {
 
 exports.handler = async function(event) {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
-    const apiKey = process.env.OPENAI_AI_KEY;
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return { statusCode: 500, body: JSON.stringify({ error: 'OpenAI API key is not configured.' }) };
 
     try {
