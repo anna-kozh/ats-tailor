@@ -69,7 +69,7 @@ exports.handler = async function(event) {
         5.  **ENFORCE WORD LIMITS:** To ensure the resume fits on one page, you MUST adhere to these strict limits:
         6.  **Professional Summary:** Maximum 65 words and 3 bullet points.
         7.  **Work Experience:** the whole section shouldn't be more than 300 words.
-        8.  **DO NOT WRITE:** development experience, healthcare experience.
+        8.  **DO NOT INVENT:** do not make up industries that are not mentioned in the Master Inventory. Do not make up that I have developer experience.
 
         Your final output should be a complete resume as a single block of text, starting with a powerful Professional Summary (2-3 bullets), mentionting 12 years of experience, followed by Work Experience, and then the Skills section.
         `;
