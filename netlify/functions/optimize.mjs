@@ -69,7 +69,7 @@ exports.handler = async function(event) {
             - **Professional Summary:** Maximum 65 words.
             - **Each of the first three jobs listed:** The entire 'accomplishments' section for each job (all bullet points combined) should be a maximum of 70 words.
 
-        Your final output should be a complete resume as a single block of text, starting with a powerful bulleted Professional Summary, followed by Work Experience, and then the Skills section.
+        Your final output should be a complete resume as a single block of text, starting with a powerful Professional Summary (2-3 bullets), mentionting 12 years of experience, followed by Work Experience, and then the Skills section.
         `;
         const writerUserPrompt = `**CRITICAL KEYWORDS TO INCLUDE:**\n${keywords.join(', ')}\n\n---\n\n**JOB DESCRIPTION (for context):**\n${jobDescription}\n\n---\n\n**CANDIDATE'S FULL EXPERIENCE INVENTORY (PRESERVE FACTS):**\n${masterInventory}`;
         
