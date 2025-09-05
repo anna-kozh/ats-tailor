@@ -10,6 +10,34 @@ const calculateScore = (text, keywords) => {
     return (matches / keywords.length) * 100;
 };
 
+const callOpenAI = async (apiKey, systemPrompt, userPrompt, isJson = true) => {
+    const body = {
+        model: 'gpt-4o',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.5,
+    };
+    if (isJson) {
+        body.response_format = { type: "json_object" };
+    }
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    if (!response.ok) {
+        const errorData = await response.json();
+        console.error("OpenAI API Error:", errorData);
+        throw new Error(`OpenAI API call failed: ${errorData.error.message}`);
+    }
+    const data = await response.json();
+    const content = data.choices[0].message.content;
+    return isJson ? JSON.parse(content) : content;
+};
+
+
 exports.handler = async function(event) {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     const apiKey = process.env.OPENAI_API_KEY;
@@ -21,53 +49,24 @@ exports.handler = async function(event) {
             return { statusCode: 400, body: JSON.stringify({ error: 'Experience Inventory and Job Description are required.' }) };
         }
 
-        const systemPrompt = `You are an AI executive career strategist. Your goal is to produce a resume with a 95%+ alignment score by performing a sophisticated "Chain-of-Thought" process internally before writing.
+        // --- PASS 1: THE STRATEGIST (Keyword Extraction) ---
+        const keywordSystemPrompt = `You are an AI data analyst. Your sole job is to analyze the provided job description and company values to extract the 15 most important keywords and skills a candidate must have. Return a single JSON object with this structure: {"keywords": ["...", "..."]}`;
+        const keywordUserPrompt = `**JOB DESCRIPTION:**\n${jobDescription}\n\n---\n\n**COMPANY VALUES & CULTURE:**\n${companyValues || 'Not provided.'}`;
+        const { keywords } = await callOpenAI(apiKey, keywordSystemPrompt, keywordUserPrompt);
 
-        **Internal Thought Process (DO NOT output this part):**
-        1.  **Holistic Profile Synthesis:** First, I will analyze the Job Description for skills, the Company Values for cultural DNA, and the Experience Inventory for proof. I will synthesize these into a "Target Candidate Profile."
-        2.  **Strategic Theme Identification:** Based on the profile, I will identify the 3-5 core themes a winning resume must convey (e.g., 'Drives business impact with design,' 'Builds scalable systems from scratch').
-        3.  **Evidence Mapping:** For each theme, I will scan the entire Experience Inventory and select the most powerful, metric-driven accomplishment that serves as concrete proof for that theme.
-        4.  **Keyword Extraction:** I will then generate a list of the 15 most critical keywords that align with my strategic analysis.
-        
-        **Final Execution (This is what you WILL output):**
-        After completing my internal strategic analysis, I will write the resume.
-        - The Professional Summary will be a powerful narrative built around the strategic themes I identified.
-        - The Work Experience section will prominently feature the specific "best evidence" accomplishments I mapped to those themes, re-written for maximum impact.
-        - I will then score the original inventory and my final, optimized resume against the keywords I extracted.
-        
-        You MUST return your final output as a single, clean JSON object with this exact structure:
-        {"keywords": ["..."], "originalScore": ..., "optimizedScore": ..., "optimizedResume": "..."}`;
-        
-        const userPrompt = `**JOB DESCRIPTION:**\n${jobDescription}\n\n---\n\n**COMPANY VALUES & CULTURE:**\n${companyValues || 'Not provided.'}\n\n---\n\n**CANDIDATE'S EXPERIENCE INVENTORY:**\n${masterInventory}`;
-
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: 'gpt-4o',
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt }
-                ],
-                temperature: 0.5,
-                response_format: { type: "json_object" }
-            })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            console.error("OpenAI API Error:", errorData);
-            throw new Error(`OpenAI API call failed: ${errorData.error.message}`);
+        if (!keywords || keywords.length === 0) {
+            throw new Error("Keyword extraction failed or returned no keywords.");
         }
 
-        const data = await response.json();
-        const content = JSON.parse(data.choices[0].message.content);
-
-        // We trust the AI's generated scores in this more advanced model, but we still need to provide the data for the UI.
-        const keywords = content.keywords || [];
-        const finalResume = content.optimizedResume || "";
-        const originalScore = content.originalScore || calculateScore(masterInventory, keywords);
-        const optimizedScore = content.optimizedScore || calculateScore(finalResume, keywords);
+        // --- PASS 2: THE WRITER (Guided by Keywords) ---
+        const writerSystemPrompt = `You are a master resume writer. You will be given a list of critical keywords and a candidate's full experience inventory. Your task is to write a powerful, high-impact resume that is perfectly tailored to the job description and aggressively and naturally weaves in the provided keywords. Focus on quantifiable results from the inventory. The output should be only the resume text, with no extra commentary.`;
+        const writerUserPrompt = `**CRITICAL KEYWORDS TO INCLUDE:**\n${keywords.join(', ')}\n\n---\n\n**JOB DESCRIPTION:**\n${jobDescription}\n\n---\n\n**COMPANY VALUES & CULTURE:**\n${companyValues || 'Not provided.'}\n\n---\n\n**CANDIDATE'S EXPERIENCE INVENTORY:**\n${masterInventory}`;
+        
+        const finalResume = await callOpenAI(apiKey, writerSystemPrompt, writerUserPrompt, false);
+        
+        // --- FINAL, RELIABLE SCORING ---
+        const originalScore = calculateScore(masterInventory, keywords);
+        const optimizedScore = calculateScore(finalResume, keywords);
 
         return {
             statusCode: 200,
