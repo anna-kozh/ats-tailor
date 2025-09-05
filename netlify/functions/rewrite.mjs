@@ -4,7 +4,7 @@
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = "gpt-4o-mini";
-const OPENAI_TIMEOUT_MS = 8000; // keep calls snappy
+const OPENAI_TIMEOUT_MS = 15000; // increased from 8000 for stability
 
 export async function handler(event) {
   try {
@@ -22,7 +22,7 @@ export async function handler(event) {
     // 3) Plan keywords to lift to 95 (deterministic greedy marginal-gain)
     const plan = planTo95(jdTerms, s1, 95);
 
-    // 4) One OpenAI rewrite pass per request (to avoid 504s). It will weave the plan.
+    // 4) One OpenAI rewrite pass per request (avoid 504s). It will weave the plan.
     let resumeV2 = resumeV1;
     let s2 = s1;
     if (s1.total < 95 && plan.items.length) {
@@ -57,10 +57,25 @@ export async function handler(event) {
    Keyword mining (JD → terms)
    ========================= */
 
+// stricter stopwords (kills junk like how/ll/re/ve/first/work/etc)
 const STOPWORDS = new Set(`
-a an the and or but of in on at for with from by as is are was were be been being to your you we they it this that these those over under during into after before about across our their us them i me my mine ours yours his her its if then than so such etc via per
-about-based using through within will ability strong excellent great good new plus etc etc.
-`.trim().split(/\s+/));
+a an the and or but of in on at for with from by as is are was were be been being to your you we they it this that these those how what where when which who whom whose why will would could should can may might must than then so such via per about-based using through within
+i me my mine our ours us them their they he she her his its your you're you'll you've i've we'll we're it's
+ll ve re dont don't isnt isn't cant can't won't wouldnt couldn't shouldn't arent aren't had has have do does did doing done
+every each either neither both few many much most more some any other another only own same just still even very first last new fast slow high low more less make move work ship back always often
+`.replace(/\s+/g,' ').trim().split(/\s+/));
+
+// allow single-word terms only if whitelisted; bigrams/trigrams are fine
+const SINGLE_WORD_WHITELIST = new Set([
+  // domain/tech
+  "ai","llm","hipaa","fhir","hl7","ehr","emr","crm","phi",
+  "react","typescript","javascript","next.js","nextjs","node","node.js","tailwind",
+  "figma","figjam","amplitude","mixpanel","segment",
+  // healthcare ops
+  "telehealth","triage","scheduling","routing","ivr","sip","compliance",
+  // design
+  "accessibility","wcag","prototyping","tokens"
+]);
 
 const SYNONYMS = {
   "design system": ["design systems","component library","component libraries","ui kit","ui system"],
@@ -69,13 +84,12 @@ const SYNONYMS = {
   "usability testing": ["user testing","ux testing","usability studies","research sessions"],
   "accessibility": ["a11y","wcag"],
   "prototyping": ["prototype","prototypes","rapid prototyping","hi-fi prototype","low-fi prototype"],
-  "interaction design": ["ixd","interaction","flows","user flows"],
+  "interaction design": ["ixd","user flows","flows"],
   "visual design": ["ui design","interface design"],
   "a/b testing": ["experimentation","ab testing","split testing"],
-  "metrics": ["kpis","north star metric","analytics"],
   "llm": ["large language model","foundation model","foundational model"],
   "rag": ["retrieval augmented generation","retrieval-augmented generation"],
-  "prompt engineering": ["prompt design","prompting","prompt craft"],
+  "prompt engineering": ["prompt design","prompting"],
   "agent": ["agentic","autonomous agent","copilot","assistant","ai agent","agentic ux"],
   "react": ["react.js","reactjs"],
   "node.js": ["node","nodejs"],
@@ -85,13 +99,53 @@ const SYNONYMS = {
   "hipaa": ["phi","health privacy"],
   "soc 2": ["soc2"]
 };
-
 const CANON_KEYS = Object.keys(SYNONYMS);
 
-const JD_TITLE_HINTS = [/^role\b/i, /^title\b/i];
-const JD_REQ_HINTS = /(must|required|minimum|qualifications|requirements)/i;
+const JD_REQ_HINTS  = /(must|required|minimum|qualifications|requirements)/i;
 const JD_RESP_HINTS = /(responsibilities|what you'll do|you will|about the role|role)/i;
 const JD_NICE_HINTS = /(nice to have|preferred|bonus)/i;
+
+function tokenize(s) {
+  return (s || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\+\#\.\- ]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter(t => !STOPWORDS.has(t));
+}
+
+function ngrams(tokens, maxN=3) {
+  const out = [];
+  for (let i=0;i<tokens.length;i++){
+    for (let n=1;n<=maxN;n++){
+      if (i+n>tokens.length) break;
+      const gram = tokens.slice(i,i+n).join(" ");
+      out.push(gram);
+    }
+  }
+  return out;
+}
+
+function isValidGram(g) {
+  if (!g) return false;
+  const clean = g.replace(/[\.]+$/,'');
+  if (/^[0-9]+$/.test(clean)) return false; // pure numbers
+  if (/^[a-z]$/.test(clean)) return false;  // single letter
+  // single-word grams only if in whitelist
+  if (!clean.includes(" ")) {
+    return clean.length >= 3 && SINGLE_WORD_WHITELIST.has(clean);
+  }
+  return true; // allow bigrams/trigrams
+}
+
+function canonical(term) {
+  term = term.toLowerCase();
+  for (const canon of CANON_KEYS) {
+    if (term === canon) return canon;
+    if ((SYNONYMS[canon] || []).includes(term)) return canon;
+  }
+  return term;
+}
 
 function mineJDTerms(jdRaw) {
   const lines = jdRaw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
@@ -99,12 +153,10 @@ function mineJDTerms(jdRaw) {
 
   const titleLine = lines[0] || "";
   const sections = lines.map((line, idx) => {
-    const text = line.toLowerCase();
-    if (idx === 0 || JD_TITLE_HINTS.some(rx => rx.test(line))) return { text: line, base: 3 };
-    if (JD_REQ_HINTS.test(line)) return { text: line, base: 3 };
+    if (idx === 0) return { text: line, base: 3 };
+    if (JD_REQ_HINTS.test(line))  return { text: line, base: 3 };
     if (JD_RESP_HINTS.test(line)) return { text: line, base: 2 };
     if (JD_NICE_HINTS.test(line)) return { text: line, base: 1 };
-    // Default neutral content
     return { text: line, base: 2 };
   });
 
@@ -118,45 +170,41 @@ function mineJDTerms(jdRaw) {
       local.set(canon, (local.get(canon) || 0) + 1);
     }
     for (const [term, freq] of local) {
-      // Section weighted freq with log-dampening
       const add = base * (1 + Math.log(1 + freq));
       weightMap.set(term, (weightMap.get(term) || 0) + add);
     }
   }
 
-  // Boost title terms (common in real JD ranking)
+  // Boost title terms
   for (const t of ngrams(tokenize(titleLine), 3)) {
     if (!isValidGram(t)) continue;
     const can = canonical(t);
     weightMap.set(can, (weightMap.get(can) || 0) + 1.5);
   }
 
-  // Convert to array, filter noise, keep top 40
+  // Prefer phrases, keep stronger signals
   let arr = Array.from(weightMap.entries())
-    .filter(([term, w]) => term.length >= 2 && w > 1.2) // drop very weak/noisy terms
-    .map(([term, w]) => ({ term, weight: w }));
+    .map(([term, w]) => ({ term, weight: w, n: term.split(" ").length }))
+    .filter(x => x.weight > 0.6) // was 1.2
+    .sort((a,b)=> (b.n - a.n) || (b.weight - a.weight));
 
-  // Normalize to weights {3,2,1} banded by quantiles
-  arr.sort((a,b)=>b.weight - a.weight);
-  const topN = Math.min(40, arr.length);
-  arr = arr.slice(0, topN);
+  // cap to top 60 terms
+  arr = arr.slice(0, 60);
+
+  // Band weights to {3,2,1} by quantiles
   const ws = arr.map(x=>x.weight);
-  const q66 = quantile(ws, 0.66);
-  const q33 = quantile(ws, 0.33);
-  for (const x of arr) {
-    x.weight = x.weight >= q66 ? 3 : (x.weight >= q33 ? 2 : 1);
-  }
-  // Dedup near-duplicates (e.g., "design system" vs "design systems")
-  const seen = new Set();
-  const out = [];
+  const q66 = quantile(ws, 0.66), q33 = quantile(ws, 0.33);
+  for (const x of arr) x.weight = x.weight >= q66 ? 3 : (x.weight >= q33 ? 2 : 1);
+
+  // Dedup canonically
+  const seen = new Set(); const out = [];
   for (const x of arr) {
     const k = x.term;
     if (seen.has(k)) continue;
     seen.add(k);
-    out.push(x);
+    out.push({ term: k, weight: x.weight });
   }
-  // Sort final: weight desc, then alpha
-  out.sort((a,b)=>b.weight - a.weight || a.term.localeCompare(b.term));
+  out.sort((a,b)=> b.weight - a.weight || a.term.localeCompare(b.term));
   return out;
 }
 
@@ -237,7 +285,7 @@ function scoreResume(resumeRaw, jdTerms) {
   };
 }
 
-function mapWeight70(w){ return w === 3 ? 3 : w === 2 ? 2 : 1; } // simple linear mapping to keep relative weights
+function mapWeight70(w){ return w === 3 ? 3 : w === 2 ? 2 : 1; }
 function distinctHits(sectionText, jdTerms) {
   const out = new Set();
   const s = (sectionText || "").toLowerCase();
@@ -246,16 +294,13 @@ function distinctHits(sectionText, jdTerms) {
 }
 
 function matchScore(resumeLower, term) {
-  // Exact n-gram
-  if (phraseIn(resumeLower, term)) return 1.0;
-  // Synonym ~ full credit
+  if (phraseIn(resumeLower, term)) return 1.0; // exact n-gram
   for (const canon of CANON_KEYS) {
     if (term === canon) {
       const syns = SYNONYMS[canon];
-      if (syns.some(s => phraseIn(resumeLower, s))) return 0.85;
+      if (syns.some(s => phraseIn(resumeLower, s))) return 0.85; // synonym close to full credit
     }
   }
-  // Head word stem approx
   const head = headWord(term);
   const stemRe = new RegExp(`\\b${escapeRe(head)}(s|es|ing|ed)?\\b`, "i");
   if (stemRe.test(resumeLower)) return 0.6;
@@ -263,11 +308,10 @@ function matchScore(resumeLower, term) {
 }
 
 /* =========================
-   Greedy plan to reach 95
+   Greedy plan to reach 95 (slightly more aggressive)
    ========================= */
 
 function planTo95(jdTerms, scored, target = 95) {
-  // Current state
   let projected = scored.total;
   let counts = { ...scored.sectionDistinct }; // {summary, roles, skills}
   let contextPts = scored.contextPts;
@@ -278,9 +322,8 @@ function planTo95(jdTerms, scored, target = 95) {
     .filter(x => x.ms < 1.0);
 
   const items = [];
-  const maxAdds = 16;
+  const maxAdds = 20; // was 16
 
-  // Helper to recompute placement after adding one distinct term to a section
   const placementScore = (c) => {
     let pS = 5 * Math.min(1, c.summary / 3);
     let pR = 7 * Math.min(1, c.roles   / 10);
@@ -290,9 +333,8 @@ function planTo95(jdTerms, scored, target = 95) {
     if (c.skills >= 0.6 * totalDistinct) p = Math.min(p, 7);
     return p;
   };
-  const basePlacement = placementScore(counts);
+  let basePlacement = placementScore(counts);
 
-  // Greedy select
   for (const m of missing) {
     if (items.length >= maxAdds || projected >= target) break;
 
@@ -305,39 +347,46 @@ function planTo95(jdTerms, scored, target = 95) {
 
     for (const sec of choices) {
       const nextCounts = { ...counts };
-      const distinctAlready = distinctHitsForSection(sec, m.term, scored); // whether term already counted in that section
-      if (!distinctAlready) nextCounts[sec] = nextCounts[sec] + 1;
+      // Treat as adding a new distinct term in that section
+      nextCounts[sec] = nextCounts[sec] + 1;
 
       const newPlacement = placementScore(nextCounts);
       const placementDelta = newPlacement - basePlacement;
 
-      // Context: only grows if we add to roles and we still have headroom
+      // Context grows only if adding to roles; assume +2 (verb + metric) if headroom
       const contextDelta = sec === "roles" ? Math.min(2, Math.max(0, 15 - contextPts)) : 0;
 
       const totalGain = covDelta + placementDelta + contextDelta;
       if (totalGain > best.gain) best = { section: sec, gain: totalGain, placementDelta, contextDelta };
     }
 
-    // Apply the best choice
-    items.push({ term: m.term, weight: m.weight, target: best.section, covDelta: round1(covDelta), placeDelta: round1(best.placementDelta), ctxDelta: best.contextDelta });
+    items.push({
+      term: m.term,
+      weight: m.weight,
+      target: best.section,
+      covDelta: round1(covDelta),
+      placeDelta: round1(best.placementDelta),
+      ctxDelta: best.contextDelta
+    });
+
     // Update projected state
+    counts[best.section] += 1;
+    basePlacement += best.placementDelta;
     if (best.section === "roles") contextPts = Math.min(15, contextPts + best.contextDelta);
-    const sectionAlready = distinctHitsForSection(best.section, m.term, scored);
-    if (!sectionAlready) counts[best.section] += 1;
     projected = round1(projected + covDelta + best.placementDelta + best.contextDelta);
   }
 
-  return { items, projected };
-}
+  // Ensure Summary gets 2–4 of the top-weight items if underrepresented
+  const needSummary = Math.max(0, 2 - items.filter(i => i.target === "summary").length);
+  if (needSummary > 0) {
+    let switched = 0;
+    for (const it of items) {
+      if (switched >= needSummary) break;
+      if (it.target === "roles" && it.weight >= 2) { it.target = "summary"; switched++; }
+    }
+  }
 
-function distinctHitsForSection(section, term, scored) {
-  const secText = section === "summary" ? "summary" : section === "roles" ? "roles" : "skills";
-  // We don't have per-term per-section mapping from score, so approximate:
-  // If the resume already had the exact term anywhere in that section, it would have contributed;
-  // use a coarse heuristic: if total distinct in that section >= total distinct overall perTerm? Not available.
-  // Simpler: assume not counted per section; planner will overestimate placement occasionally, acceptable.
-  // Return false so we add +1 distinct per planned insertion.
-  return false;
+  return { items, projected };
 }
 
 /* =========================
@@ -358,11 +407,11 @@ ${plan.map(p => `- ${p.term} → ${p.target}`).join("\n")}
 INSTRUCTIONS:
 - Rewrite the resume so these keywords appear naturally and meaningfully.
 - Place terms per target section:
-  • Summary: 1–2 tight lines using 2–4 top-weight terms.
+  • Summary: highlights of the career (3-5 bullet points)
   • Experience (roles): add or edit bullets; each bullet uses an action verb and includes a concrete metric or a [metric] placeholder.
   • Skills: add remaining terms to a flat list; no duplicates, no stacking variants (e.g., "React" vs "React.js" → pick one).
 - Keep facts plausible. Do NOT invent employers, dates, or degrees. Do NOT change job titles wildly.
-- Senior, crisp tone. Avoid keyword dumping. Keep total under ~900 words.
+- Match tone of the original v1 resume. Avoid keyword dumping. Keep total under ~900 words.
 - Output ONLY the rewritten resume text (no markdown, no commentary).
 
 RESUME V1:
@@ -431,69 +480,21 @@ function splitResumeSections(raw) {
 }
 
 /* =========================
-   Text utils
+   Text + generic helpers
    ========================= */
-
-function tokenize(s) {
-  return (s || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\+\#\.\- ]+/g, " ")
-    .split(/\s+/)
-    .filter(Boolean)
-    .filter(t => !STOPWORDS.has(t));
-}
-
-function ngrams(tokens, maxN=3) {
-  const out = [];
-  for (let i=0;i<tokens.length;i++){
-    for (let n=1;n<=maxN;n++){
-      if (i+n>tokens.length) break;
-      const gram = tokens.slice(i,i+n).join(" ");
-      out.push(gram);
-    }
-  }
-  return out;
-}
-
-function isValidGram(g) {
-  if (!g) return false;
-  if (g.length < 2) return false;
-  // discard pure numbers and single letters
-  if (/^[0-9]+$/.test(g)) return false;
-  if (/^[a-z]$/.test(g)) return false;
-  // avoid common junk grams
-  if (STOPWORDS.has(g)) return false;
-  return true;
-}
-
-function canonical(term) {
-  term = term.toLowerCase();
-  for (const canon of CANON_KEYS) {
-    if (term === canon) return canon;
-    if ((SYNONYMS[canon] || []).includes(term)) return canon;
-  }
-  return term;
-}
-
-function headWord(term) {
-  return (term.split(/\s+/)[0] || "").toLowerCase();
-}
 
 function phraseIn(textLower, phrase) {
   return new RegExp(`\\b${escapeRe(phrase.toLowerCase())}\\b`).test(textLower);
 }
-
 function splitSentences(s) {
   return (s || "")
     .split(/\n+|(?<=\.)\s+(?=[A-Z])/g)
     .map(t => t.trim())
     .filter(Boolean);
 }
-
-/* =========================
-   Generic helpers
-   ========================= */
-
+function headWord(term) {
+  return (term.split(/\s+/)[0] || "").toLowerCase();
+}
 function json(statusCode, obj) {
   return { statusCode, headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) };
 }
