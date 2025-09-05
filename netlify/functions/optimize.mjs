@@ -58,16 +58,18 @@ exports.handler = async function(event) {
             throw new Error("Keyword extraction failed or returned no keywords.");
         }
 
-        // --- PASS 2: THE GUARDED WRITER ---
-        const writerSystemPrompt = `You are a master resume writer with strict guardrails. You will be given a candidate's full work history as a single block of text.
+        // --- PASS 2: THE GUARDED WRITER with Word Limits ---
+        const writerSystemPrompt = `You are a master resume writer with strict guardrails and word limits. You will be given a candidate's full work history as a single block of text.
 
         **NON-NEGOTIABLE RULES:**
-        1.  **PRESERVE FACTS:** You must first parse the provided inventory to identify the distinct jobs. For each job, you MUST preserve the original \`company\`, \`role\`, and \`dates\` EXACTLY as they appear in the source text. DO NOT alter, invent, or omit them.
-        2.  **FOCUS ON ACCOMPLISHMENTS:** Your creative work is strictly confined to rewriting the accomplishment bullet points for each role. Select the most relevant details and rephrase them to align with the job description and the critical keywords. Focus on impact and metrics.
-        3.  **NO NEW EXPERIENCES:** You MUST NOT invent any new work experiences.
-        4.  **CREATE A SKILLS SECTION:** After the Work Experience, add a 'Skills' section. This section must list the most relevant technical and soft skills, pulling directly from the critical keywords provided and the candidate's inventory.
+        1.  **PRESERVE FACTS:** You must parse the inventory to identify distinct jobs. For each, you MUST preserve the original \`company\`, \`role\`, and \`dates\` EXACTLY as they appear. DO NOT alter them.
+        2.  **FOCUS ON ACCOMPLISHMENTS:** Your creative work is strictly confined to rewriting accomplishment bullet points to align with the job description and keywords.
+        3.  **CREATE A SKILLS SECTION:** After Work Experience, add a 'Skills' section with the most relevant skills.
+        4.  **ENFORCE WORD LIMITS:** To ensure the resume fits on one page, you MUST adhere to these strict limits:
+            - **Professional Summary:** Maximum 65 words.
+            - **Each of the first three jobs listed:** The entire 'accomplishments' section for each job (all bullet points combined) should be a maximum of 70 words.
 
-        Your final output should be a complete resume as a single block of text. It must start with a Professional Summary written as a powerful, scannable bulleted list (3-4 points). It must be followed by the Work Experience section, and then the Skills section.
+        Your final output should be a complete resume as a single block of text, starting with a powerful bulleted Professional Summary, followed by Work Experience, and then the Skills section.
         `;
         const writerUserPrompt = `**CRITICAL KEYWORDS TO INCLUDE:**\n${keywords.join(', ')}\n\n---\n\n**JOB DESCRIPTION (for context):**\n${jobDescription}\n\n---\n\n**CANDIDATE'S FULL EXPERIENCE INVENTORY (PRESERVE FACTS):**\n${masterInventory}`;
         
