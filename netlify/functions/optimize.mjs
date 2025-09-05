@@ -64,12 +64,12 @@ exports.handler = async function(event) {
         **NON-NEGOTIABLE RULES:**
         1.  **PRESERVE FACTS:** You must parse the inventory to identify distinct jobs. For each, you MUST preserve the original \`company\`, \`role\`, and \`dates\` EXACTLY as they appear. DO NOT alter them.
         2.  **FOCUS ON ACCOMPLISHMENTS:** Your creative work is strictly confined to rewriting accomplishment bullet points to align with the job description and keywords.
-        3.  **BULLET POINTS - WORD COUNT:** Freelance (30-40 words), Simpology (70-80 words), SkoolBag (60-80 words), ASG GROUP (less than 20 words), VoiceBox (less than 20 words)
+        3.  **BULLET POINTS - WORD COUNT:** Freelance (40 words), Simpology (80 words), SkoolBag (80 words), ASG GROUP (20 words), VoiceBox (20 words)
         4. **CREATE A SKILLS SECTION:** After Work Experience, add a 'Skills' section with the most relevant skills.
         5.  **ENFORCE WORD LIMITS:** To ensure the resume fits on one page, you MUST adhere to these strict limits:
-        6.  **Professional Summary:** Maximum 65 words and 3 bullet points.
-        7.  **Work Experience:** the whole section shouldn't be more than 300 words.
-        8.  **DO NOT INVENT:** do not make up industries that are not mentioned in the Master Inventory. Do not make up that I have developer experience.
+        6.  **Professional Summary:** Maximum 70 words and 3 bullet points.
+        7.  **Work Experience:** the whole Work Experience section shouldn't be more than 300 words.
+        8.  **DO NOT INVENT:** do not make up industries that are not mentioned in the Master Inventory. 
 
         Your final output should be a complete resume as a single block of text, starting with a powerful Professional Summary (2-3 bullets), mentionting 12 years of experience, followed by Work Experience, and then the Skills section.
         `;
