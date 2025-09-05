@@ -66,8 +66,8 @@ exports.handler = async function(event) {
         2.  **FOCUS ON ACCOMPLISHMENTS:** Your creative work is strictly confined to rewriting accomplishment bullet points to align with the job description and keywords.
         3.  **CREATE A SKILLS SECTION:** After Work Experience, add a 'Skills' section with the most relevant skills.
         4.  **ENFORCE WORD LIMITS:** To ensure the resume fits on one page, you MUST adhere to these strict limits:
-            - **Professional Summary:** Maximum 65 words.
-            - **Each of the first three jobs listed:** The entire 'accomplishments' section for each job (all bullet points combined) should be a maximum of 70 words.
+        5.  **Professional Summary:** Maximum 65 words and 3 bullet points.
+        6.  **Work Experience:** the whole section shouldn't be more than 300 words.
 
         Your final output should be a complete resume as a single block of text, starting with a powerful Professional Summary (2-3 bullets), mentionting 12 years of experience, followed by Work Experience, and then the Skills section.
         `;
