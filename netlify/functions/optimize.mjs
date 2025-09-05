@@ -65,8 +65,9 @@ exports.handler = async function(event) {
         1.  **PRESERVE FACTS:** You must first parse the provided inventory to identify the distinct jobs. For each job, you MUST preserve the original \`company\`, \`role\`, and \`dates\` EXACTLY as they appear in the source text. DO NOT alter, invent, or omit them.
         2.  **FOCUS ON ACCOMPLISHMENTS:** Your creative work is strictly confined to rewriting the accomplishment bullet points for each role. Select the most relevant details and rephrase them to align with the job description and the critical keywords. Focus on impact and metrics.
         3.  **NO NEW EXPERIENCES:** You MUST NOT invent any new work experiences.
+        4.  **CREATE A SKILLS SECTION:** After the Work Experience, add a 'Skills' section. This section must list the most relevant technical and soft skills, pulling directly from the critical keywords provided and the candidate's inventory.
 
-        Your final output should be a complete resume as a single block of text, starting with a powerful Professional Summary, followed by the Work Experience section.
+        Your final output should be a complete resume as a single block of text, starting with a powerful Professional Summary, followed by the Work Experience section, and then the Skills section.
         `;
         const writerUserPrompt = `**CRITICAL KEYWORDS TO INCLUDE:**\n${keywords.join(', ')}\n\n---\n\n**JOB DESCRIPTION (for context):**\n${jobDescription}\n\n---\n\n**CANDIDATE'S FULL EXPERIENCE INVENTORY (PRESERVE FACTS):**\n${masterInventory}`;
         
