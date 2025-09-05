@@ -40,7 +40,7 @@ const callOpenAI = async (apiKey, systemPrompt, userPrompt, isJson = true) => {
 
 exports.handler = async function(event) {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.OPENAI_AI_KEY;
     if (!apiKey) return { statusCode: 500, body: JSON.stringify({ error: 'OpenAI API key is not configured.' }) };
 
     try {
@@ -58,9 +58,17 @@ exports.handler = async function(event) {
             throw new Error("Keyword extraction failed or returned no keywords.");
         }
 
-        // --- PASS 2: THE WRITER (Guided by Keywords) ---
-        const writerSystemPrompt = `You are a master resume writer. You will be given a list of critical keywords and a candidate's full experience inventory. Your task is to write a powerful, high-impact resume that is perfectly tailored to the job description and aggressively and naturally weaves in the provided keywords. Focus on quantifiable results from the inventory. The output should be only the resume text, with no extra commentary.`;
-        const writerUserPrompt = `**CRITICAL KEYWORDS TO INCLUDE:**\n${keywords.join(', ')}\n\n---\n\n**JOB DESCRIPTION:**\n${jobDescription}\n\n---\n\n**COMPANY VALUES & CULTURE:**\n${companyValues || 'Not provided.'}\n\n---\n\n**CANDIDATE'S EXPERIENCE INVENTORY:**\n${masterInventory}`;
+        // --- PASS 2: THE GUARDED WRITER ---
+        const writerSystemPrompt = `You are a master resume writer with strict guardrails. You will be given a candidate's full work history as a single block of text.
+
+        **NON-NEGOTIABLE RULES:**
+        1.  **PRESERVE FACTS:** You must first parse the provided inventory to identify the distinct jobs. For each job, you MUST preserve the original \`company\`, \`role\`, and \`dates\` EXACTLY as they appear in the source text. DO NOT alter, invent, or omit them.
+        2.  **FOCUS ON ACCOMPLISHMENTS:** Your creative work is strictly confined to rewriting the accomplishment bullet points for each role. Select the most relevant details and rephrase them to align with the job description and the critical keywords. Focus on impact and metrics.
+        3.  **NO NEW EXPERIENCES:** You MUST NOT invent any new work experiences.
+
+        Your final output should be a complete resume as a single block of text, starting with a powerful Professional Summary, followed by the Work Experience section.
+        `;
+        const writerUserPrompt = `**CRITICAL KEYWORDS TO INCLUDE:**\n${keywords.join(', ')}\n\n---\n\n**JOB DESCRIPTION (for context):**\n${jobDescription}\n\n---\n\n**CANDIDATE'S FULL EXPERIENCE INVENTORY (PRESERVE FACTS):**\n${masterInventory}`;
         
         const finalResume = await callOpenAI(apiKey, writerSystemPrompt, writerUserPrompt, false);
         
