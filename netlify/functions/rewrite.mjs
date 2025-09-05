@@ -1,9 +1,9 @@
 // netlify/functions/rewrite.mjs
 import OpenAI from "openai";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Strict 9s timeout to dodge Netlify 10s limit
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 9000 });
 
-// --- Keyword extraction + scoring ---
 const STOPWORDS = new Set(`a an the and or but of in on at for with from by as is are was were be been being to your you we they it this that these those how what where when which who whom whose why will would could should can may might must than then so such via per about-based using through within i me my mine our ours us them their they he she her his its your you're you'll you've i've we'll we're it's ll ve re dont don't isnt isn't cant can't won't wouldnt couldn't shouldn't arent aren't had has have do does did doing done every each either neither both few many much most more some any other another only own same just still even very first last new fast slow high low more less make move work ship back always often`.split(/\s+/));
 
 function tokenize(text){
@@ -19,9 +19,9 @@ function extractKeywords(jd){
   const freq = new Map();
   for(const t of toks){ freq.set(t, (freq.get(t)||0) + 1); }
   const sorted = [...freq.entries()].sort((a,b)=>b[1]-a[1]).map(([t])=>t);
-  const required = new Set(sorted.slice(0, 40));
-  const nice = new Set(sorted.slice(40, 80));
-  const tech = new Set(sorted.filter(t => /[0-9/#.+\-]/.test(t) || t.length > 6).slice(0, 30));
+  const required = new Set(sorted.slice(0, 30));
+  const nice = new Set(sorted.slice(30, 60));
+  const tech = new Set(sorted.filter(t => /[0-9/#.+\-]/.test(t) || t.length > 6).slice(0, 25));
   return { required, nice, tech, all: new Set([...required, ...nice, ...tech]) };
 }
 
@@ -67,26 +67,32 @@ function boldAddedKeywords(v1, v2, jdKeywords){
   return esc.replace(re, (m) => `**${m}**`);
 }
 
-function atsGuidelines(){
-  // Generic ATS-friendly structure
-  return { sectionHeaders: ['Objective','Skills','Experience','Education'] };
+function trimJD(jd){
+  // Keep first ~1200 characters plus any "Requirements"/"Responsibilities" sections if present.
+  const maxChars = 1200;
+  if (jd.length <= maxChars) return jd;
+  const reqMatch = jd.match(/(Requirements|What you'll do|Responsibilities|About you)[\s\S]{0,1200}/i);
+  if (reqMatch) return reqMatch[0];
+  return jd.slice(0, maxChars);
 }
 
-// --- OpenAI rewrite loop ---
 async function rewriteOnce({resume, jd, jdKeywords}){
-  const guide = atsGuidelines();
+  const guide = { sectionHeaders: ['Objective','Skills','Experience','Education'] };
+  const jdShort = trimJD(jd);
+
   const sys = `You are an expert resume editor for ATS. Do not invent employers, dates, or degrees. You may add keywords into objective, skills, and bullet responsibilities. Keep text truthful and concise. Use plain text with clear section headers that the ATS recognizes: ${guide.sectionHeaders.join(', ')}. Keep bullets concise. Avoid keyword stuffing; spread terms in objective, skills, and bullets.`;
 
   const user = [
-    `JOB DESCRIPTION:\n${jd}\n`,
+    `JOB DESCRIPTION (trimmed):\n${jdShort}\n`,
     `CURRENT RESUME:\n${resume}\n`,
     `TARGET KEYWORDS (sample): ${[...jdKeywords.required].slice(0,20).join(', ')}\n`,
-    `REWRITE GOAL:\n- Improve match and reach >=95 proxy score\n- Keep titles, chronology, achievements\n- Add missing JD keywords naturally where relevant\n- Do not fabricate employers, dates, or education\n- Output plain text resume with sections in this order: ${guide.sectionHeaders.join(' > ')}\n`
+    `REWRITE GOAL:\n- Improve match and aim for >=95 proxy score\n- Keep titles, chronology, achievements\n- Add missing JD keywords naturally where relevant\n- Do not fabricate employers, dates, or education\n- Output plain text resume with sections in this order: ${guide.sectionHeaders.join(' > ')}\n`
   ].join('\n');
 
   const completion = await client.chat.completions.create({
     model: process.env.OPENAI_MODEL || "gpt-4o-mini",
     temperature: 0.2,
+    max_tokens: 900,
     messages: [
       { role: "system", content: sys },
       { role: "user", content: user }
@@ -112,35 +118,15 @@ export async function handler(event){
     // Score v1
     const scoreV1 = scoreText(resume, jdKeywords, roleTerms);
 
-    // Iterate up to 3 times to reach >=95
-    let v2Text = "";
-    let scoreV2 = 0;
-    let attempt = 0;
-    let input = resume;
-
-    while(attempt < 3){
-      attempt++;
-      const draft = await rewriteOnce({ resume: input, jd, jdKeywords });
-      v2Text = draft || input;
-      scoreV2 = scoreText(v2Text, jdKeywords, roleTerms);
-
-      // anti-stuffing: if adding keywords tank readability (heuristic), trim repeated lines
-      if (scoreV2 < 95){
-        // remove duplicate consecutive lines as a small cleanup
-        const lines = v2Text.split(/\r?\n/);
-        const cleaned = lines.filter((l,i,arr)=> i===0 || l.trim() !== arr[i-1].trim()).join('\n');
-        input = cleaned;
-      } else {
-        break;
-      }
-    }
-
+    // Single fast pass to avoid timeouts
+    const v2Text = await rewriteOnce({ resume, jd, jdKeywords });
+    const scoreV2 = scoreText(v2Text, jdKeywords, roleTerms);
     const boldedV2 = boldAddedKeywords(resume, v2Text, jdKeywords);
 
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ v2Text, scoreV1, scoreV2, boldedV2, attempts: attempt })
+      body: JSON.stringify({ v2Text, scoreV1, scoreV2, boldedV2, attempts: 1 })
     };
   } catch (err){
     console.error(err);

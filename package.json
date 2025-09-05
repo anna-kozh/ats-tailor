@@ -1,5 +1,5 @@
 {
-  "name": "ats-optimizer",
+  "name": "ats-optimizer-fast",
   "type": "module",
   "private": true,
   "dependencies": {
