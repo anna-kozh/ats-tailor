@@ -58,31 +58,29 @@ exports.handler = async function(event) {
             throw new Error("Keyword extraction failed or returned no keywords.");
         }
 
-        // --- PASS 2: THE GUARDED WRITER with Word Limits ---
-        const writerSystemPrompt = `You are a master resume writer with strict guardrails and word limits. You will be given a candidate's full work history as a single block of text.
+        // --- PASS 2: THE HYBRID ATS & HUMAN-FOCUSED WRITER ---
+        const writerSystemPrompt = `You are an AI resume optimizer with a two-part goal: First, to achieve a high score on an Applicant Tracking System (ATS), and second, to write a resume that is compelling and impressive to a human hiring manager.
 
         **NON-NEGOTIABLE RULES:**
-        1.  **PRESERVE FACTS:** You must parse the inventory to identify distinct jobs. For each, you MUST preserve the original \`company\`, \`role\`, and \`dates\` EXACTLY as they appear. DO NOT alter them.
-        2.  **FOCUS ON ACCOMPLISHMENTS:** Your creative work is strictly confined to rewriting accomplishment bullet points to align with the job description and keywords.
-        3.  **CREATE A SKILLS SECTION:** After Work Experience, add a 'Skills' section with the most relevant skills.
-        4.  **ENFORCE WORD LIMITS:** To ensure the resume fits on one page, you MUST adhere to these strict limits:
-            - **Professional Summary:** Maximum 65 words.
-            - **Each of the first three jobs listed:** The entire 'accomplishments' section for each job (all bullet points combined) should be a maximum of 70 words.
+        1.  **CREATE CORE COMPETENCIES FOR ATS:** Start the resume with a "Core Competencies" or "Skills" section. This should be a dense list of the most critical keywords to ensure a high ATS score.
+        2.  **WRITE FOR HUMAN IMPACT:** After the competencies section, write a powerful Professional Summary and Work Experience section. Here, you must weave the keywords in naturally. Focus on a compelling narrative, quantifiable achievements, and professional tone. Avoid robotic "keyword stuffing."
+        3.  **PRESERVE FACTS:** You must parse the inventory to identify distinct jobs. For each, you MUST preserve the original \`company\`, \`role\`, and \`dates\` EXACTLY as they appear.
+        4.  **SCORE YOUR WORK:** After writing the resume, you MUST score it by calculating the percentage of the provided keywords that are present in your final text.
 
-        Your final output should be a complete resume as a single block of text, starting with a powerful Professional Summary (2-3 bullets), mentionting 12 years of experience, followed by Work Experience, and then the Skills section.
+        Your final output should be a complete, ATS-optimized, and human-readable resume, along with your calculated score, returned as a single JSON object with this exact structure:
+        {"optimizedResume": "...", "optimizedScore": ...}
         `;
-        const writerUserPrompt = `**CRITICAL KEYWORDS TO INCLUDE:**\n${keywords.join(', ')}\n\n---\n\n**JOB DESCRIPTION (for context):**\n${jobDescription}\n\n---\n\n**CANDIDATE'S FULL EXPERIENCE INVENTORY (PRESERVE FACTS):**\n${masterInventory}`;
+        const writerUserPrompt = `**CRITICAL KEYWORDS TO INCLUDE & SCORE AGAINST:**\n${keywords.join(', ')}\n\n---\n\n**JOB DESCRIPTION (for context):**\n${jobDescription}\n\n---\n\n**CANDIDATE'S FULL EXPERIENCE INVENTORY (PRESERVE FACTS):**\n${masterInventory}`;
         
-        const finalResume = await callOpenAI(apiKey, writerSystemPrompt, writerUserPrompt, false);
+        const { optimizedResume, optimizedScore } = await callOpenAI(apiKey, writerSystemPrompt, writerUserPrompt, true);
         
         // --- FINAL, RELIABLE SCORING ---
         const originalScore = calculateScore(masterInventory, keywords);
-        const optimizedScore = calculateScore(finalResume, keywords);
 
         return {
             statusCode: 200,
             body: JSON.stringify({
-                optimizedResume: finalResume,
+                optimizedResume: optimizedResume,
                 originalScore: originalScore,
                 optimizedScore: optimizedScore,
                 keywords: keywords
