@@ -1,5 +1,5 @@
-// OpenAI rewrite using RESPONSES API (fixes 400), fast timeout, calibrated scoring,
-// bolded additions, and a safe local fallback + debug info.
+// OpenAI rewrite via RESPONSES API (with 8s timeout), calibrated scoring,
+// bolded additions, and local fallback + debug.
 
 import OpenAI from "openai";
 
@@ -9,7 +9,7 @@ const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 const client = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
-/* ---------------- keyword + scoring utils (unchanged) ---------------- */
+/* ---------------- keyword + scoring utils ---------------- */
 
 const STOPWORDS = new Set(
   `a an the and or but of in on at for with from by as is are was were be been
@@ -24,38 +24,27 @@ const STOPWORDS = new Set(
    across value values experience experiences people teams team projects project
    decision decisions time basic basics doing culture`.split(/\s+/)
 );
-
 const GENERIC_JUNK = new Set(
   `across experience experiences value values people teams team projects project
    decisions decision basic basics doing culture`.split(/\s+/)
 );
 
-function normTokens(text) {
-  return (text || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9+/#.&\- \n]/g, " ")
-    .split(/\s+/)
-    .filter(Boolean);
+function normTokens(text){
+  return (text||"").toLowerCase().replace(/[^a-z0-9+/#.&\- \n]/g," ")
+    .split(/\s+/).filter(Boolean);
 }
-function tokenize(text) {
-  return normTokens(text).filter((t) => !STOPWORDS.has(t));
+function tokenize(t){ return normTokens(t).filter(x=>!STOPWORDS.has(x)); }
+function bigrams(tokens){
+  const out=[]; for(let i=0;i<tokens.length-1;i++){
+    const a=tokens[i], b=tokens[i+1];
+    if(!a||!b) continue; if(GENERIC_JUNK.has(a)||GENERIC_JUNK.has(b)) continue;
+    if(a.length<3||b.length<3) continue; out.push(`${a} ${b}`);
+  } return out;
 }
-function bigrams(tokens) {
-  const out = [];
-  for (let i = 0; i < tokens.length - 1; i++) {
-    const a = tokens[i], b = tokens[i + 1];
-    if (!a || !b) continue;
-    if (GENERIC_JUNK.has(a) || GENERIC_JUNK.has(b)) continue;
-    if (a.length < 3 || b.length < 3) continue;
-    out.push(`${a} ${b}`);
-  }
-  return out;
-}
-function extractKeywords(jd) {
+function extractKeywords(jd){
   const toks = tokenize(jd);
-  const uni = {};
-  for (const t of toks) { if (!GENERIC_JUNK.has(t) && t.length >= 4) uni[t] = (uni[t] || 0) + 1; }
-  const bi = {}; for (const bg of bigrams(toks)) bi[bg] = (bi[bg] || 0) + 1;
+  const uni = {}; for(const t of toks){ if(!GENERIC_JUNK.has(t)&&t.length>=4) uni[t]=(uni[t]||0)+1; }
+  const bi = {}; for(const bg of bigrams(toks)) bi[bg]=(bi[bg]||0)+1;
 
   const singles = Object.entries(uni).sort((a,b)=>b[1]-a[1]).map(([t])=>t);
   const bis = Object.entries(bi).sort((a,b)=>b[1]-a[1]).map(([t])=>t);
@@ -71,72 +60,64 @@ function extractKeywords(jd) {
   return { required, nice, tech, all: new Set([...required, ...nice, ...tech]) };
 }
 
-function scoreText(text, jdKeywords, roleTerms = []) {
+function scoreText(text, jdKeywords, roleTerms=[]){
   const tokens = new Set(normTokens(text));
-  const totalReq = jdKeywords.required.size || 1;
-  let coveredReq = 0;
-  for (const term of jdKeywords.required) {
-    if (term.includes(" ")) { if (text.toLowerCase().includes(term)) coveredReq++; }
-    else if (tokens.has(term)) coveredReq++;
+  const reqTotal = jdKeywords.required.size || 1;
+  let reqHit=0; for(const term of jdKeywords.required){
+    if(term.includes(' ')){ if(text.toLowerCase().includes(term)) reqHit++; }
+    else if(tokens.has(term)) reqHit++;
   }
   const niceTotal = jdKeywords.nice.size || 1;
-  let niceHit = 0;
-  for (const term of jdKeywords.nice) {
-    if (term.includes(" ")) { if (text.toLowerCase().includes(term)) niceHit++; }
-    else if (tokens.has(term)) niceHit++;
+  let niceHit=0; for(const term of jdKeywords.nice){
+    if(term.includes(' ')){ if(text.toLowerCase().includes(term)) niceHit++; }
+    else if(tokens.has(term)) niceHit++;
   }
-  const roleTotal = roleTerms.length || 1;
-  let roleHit = 0; for (const t of roleTerms) if (tokens.has(t)) roleHit++;
-  const techTotal = jdKeywords.tech.size || 1;
-  let techHit = 0; for (const t of jdKeywords.tech) if (tokens.has(t)) techHit++;
-  let computed = (coveredReq/totalReq)*70 + (niceHit/niceTotal)*15 + (roleHit/roleTotal)*10 + (techHit/techTotal)*5;
-  const counts = {}; for (const t of normTokens(text)) counts[t] = (counts[t]||0)+1;
-  for (const [,c] of Object.entries(counts)) if (c > 12) computed -= Math.min(5, c-12);
-  return Math.max(0, Math.min(100, computed));
+  const roleTotal = roleTerms.length||1; let roleHit=0; for(const t of roleTerms) if(tokens.has(t)) roleHit++;
+  const techTotal = jdKeywords.tech.size||1; let techHit=0; for(const t of jdKeywords.tech) if(tokens.has(t)) techHit++;
+
+  let s = (reqHit/reqTotal)*70 + (niceHit/niceTotal)*15 + (roleHit/roleTotal)*10 + (techHit/techTotal)*5;
+  const counts={}; for(const t of normTokens(text)) counts[t]=(counts[t]||0)+1;
+  for(const [,c] of Object.entries(counts)) if(c>12) s-=Math.min(5,c-12);
+  return Math.max(0, Math.min(100, s));
 }
 
-function escapeHtml(s){ return (s||"").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function boldAddedKeywords(v1, v2, jdKeywords){
+function escapeHtml(s){ return (s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function boldAddedKeywords(v1,v2,jdKeywords){
   let out = escapeHtml(v2);
   const v1L = v1.toLowerCase();
   const bigs = [...jdKeywords.all].filter(t=>t.includes(' ')).sort((a,b)=>b.length-a.length);
-  for(const bg of bigs){ if(!v1L.includes(bg)){ const re = new RegExp(bg.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'); out = out.replace(re, m=>`**${m}**`);} }
-  const v1Set = new Set(normTokens(v1));
-  const singles = [...jdKeywords.all].filter(t=>!t.includes(' ')).sort((a,b)=>b.length-a.length);
+  for(const bg of bigs){ if(!v1L.includes(bg)){ const re=new RegExp(bg.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'); out=out.replace(re,m=>`**${m}**`); } }
+  const v1Set=new Set(normTokens(v1));
+  const singles=[...jdKeywords.all].filter(t=>!t.includes(' ')).sort((a,b)=>b.length-a.length);
   if(singles.length){
-    const re = new RegExp(`\\b(${singles.filter(s=>!v1Set.has(s)).map(s=>s.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\$&')).join('|')})\\b`,'gi');
-    out = out.replace(re, m=>`**${m}**`);
+    const re=new RegExp(`\\b(${singles.filter(s=>!v1Set.has(s)).map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|')})\\b`,'gi');
+    out=out.replace(re,m=>`**${m}**`);
   }
   return out;
 }
-
 function trimJD(jd){
-  const maxChars = 1000;
-  if (jd.length <= maxChars) return jd;
-  const m = jd.match(/(Requirements|What you'll do|Responsibilities|About you)[\s\S]{0,1000}/i);
-  return m ? m[0] : jd.slice(0, maxChars);
+  const max=1000; if(jd.length<=max) return jd;
+  const m=jd.match(/(Requirements|What you'll do|Responsibilities|About you)[\s\S]{0,1000}/i);
+  return m?m[0]:jd.slice(0,max);
 }
-
-function makeFallbackV2(resume, jdKeywords){
-  const req = [...jdKeywords.required].slice(0,8);
-  const nice = [...jdKeywords.nice].slice(0,6);
-  const values = req.concat(nice).filter(t => t.includes('accessib') || t.includes('accountab') || t.includes('resilien') || t.includes('ship fast') || t.includes('design system') || t.includes('patient'));
-  const obj = `Objective\nLead Product Designer aligned to JD priorities: ${req.slice(0,6).join(', ')}.`;
-  const skills = `\n\nSkills\n${req.concat(nice).slice(0,10).join(', ')}`;
-  const vals = values.length ? `\n\nValues alignment\n- ${values.join('\n- ')}` : '';
+function makeFallbackV2(resume,jdKeywords){
+  const req=[...jdKeywords.required].slice(0,8);
+  const nice=[...jdKeywords.nice].slice(0,6);
+  const values=req.concat(nice).filter(t=>t.includes('accessib')||t.includes('accountab')||t.includes('resilien')||t.includes('ship fast')||t.includes('design system')||t.includes('patient'));
+  const obj=`Objective\nLead Product Designer aligned to JD priorities: ${req.slice(0,6).join(', ')}.`;
+  const skills=`\n\nSkills\n${req.concat(nice).slice(0,10).join(', ')}`;
+  const vals=values.length?`\n\nValues alignment\n- ${values.join('\n- ')}`:'';
   return `${obj}${skills}${vals}\n\n${resume}`;
 }
 
 /* ------------------------ OpenAI (Responses API) ---------------------- */
 
-async function rewriteWithOpenAI({ resume, jd, jdKeywords }) {
-  if (!client) throw new Error("OPENAI_API_KEY missing");
-
+async function rewriteWithOpenAI({ resume, jd, jdKeywords }){
+  if(!client) throw new Error("OPENAI_API_KEY missing");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000); // 8s hard stop
-  try {
-    const guide = { sectionHeaders: ["Objective","Skills","Experience","Education"] };
-    const jdShort = trimJD(jd);
+  const timer = setTimeout(()=>controller.abort(), 8000);
+  try{
+    const guide={sectionHeaders:["Objective","Skills","Experience","Education"]};
     const sys =
       `You are an expert resume editor for ATS. Do not invent employers, dates, or degrees. ` +
       `Add missing keywords only in objective, skills, and bullet responsibilities. ` +
@@ -145,23 +126,22 @@ async function rewriteWithOpenAI({ resume, jd, jdKeywords }) {
 
     const prompt =
       `SYSTEM:\n${sys}\n\n` +
-      `JOB DESCRIPTION (trimmed):\n${jdShort}\n\n` +
+      `JOB DESCRIPTION (trimmed):\n${trimJD(jd)}\n\n` +
       `CURRENT RESUME:\n${resume}\n\n` +
       `KEY TERMS (bigrams first): ${[...jdKeywords.required].slice(0,14).join(", ")}\n\n` +
       `GOAL: Improve match. Keep titles & chronology. Output plain text resume with sections: ${guide.sectionHeaders.join(" > ")}.\n` +
       `If JD includes values (e.g., accessibility, accountability, resilience, "ship fast"), reflect them briefly without fabricating achievements.`;
 
-    const resp = await client.responses.create({
-      model: MODEL,
-      input: prompt,
-      temperature: 0.2,
-      max_output_tokens: 650,
-      timeout: 8000,
-      signal: controller.signal,
-    });
+    const resp = await client.responses.create(
+      { model: MODEL, input: prompt, temperature: 0.2, max_output_tokens: 650 },
+      { timeout: 8000, signal: controller.signal } // <-- options go here
+    );
 
-    // SDK provides output_text for convenience
-    return resp.output_text?.trim() || "";
+    const text =
+      (resp.output_text && resp.output_text.trim()) ||
+      (resp.output?.[0]?.content?.[0]?.text?.value || "").trim();
+
+    return text;
   } finally {
     clearTimeout(timer);
   }
@@ -170,20 +150,16 @@ async function rewriteWithOpenAI({ resume, jd, jdKeywords }) {
 /* -------------------------------- handler ----------------------------- */
 
 export async function handler(event){
-  if(event.httpMethod !== 'POST'){
-    return { statusCode: 405, body: 'Method Not Allowed' };
-  }
+  if(event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
 
   let debug = { dryRun: DRY_RUN, hasKey: !!OPENAI_API_KEY };
 
   try{
     const { resume, jd } = JSON.parse(event.body || "{}");
-    if(!resume || !jd){
-      return { statusCode: 400, body: JSON.stringify({ error: "Missing resume or jd" }) };
-    }
+    if(!resume || !jd) return { statusCode: 400, body: JSON.stringify({ error: "Missing resume or jd" }) };
 
     const jdKeywords = extractKeywords(jd);
-    const roleTerms = ['lead','senior','staff','designer','product','ux','ui','system','strategy'];
+    const roleTerms = ["lead","senior","staff","designer","product","ux","ui","system","strategy"];
 
     const scoreV1 = scoreText(resume, jdKeywords, roleTerms);
 
@@ -200,7 +176,10 @@ export async function handler(event){
       } catch(e){
         mode = "timeoutFallback";
         v2Text = makeFallbackV2(resume, jdKeywords);
-        debug.reason = String(e?.response?.data?.error?.message || e?.status || e?.statusText || e?.code || e?.message || "unknown");
+        debug.reason = String(
+          e?.response?.data?.error?.message ||
+          e?.status || e?.statusText || e?.code || e?.message || "unknown"
+        );
       }
     }
 
@@ -210,10 +189,9 @@ export async function handler(event){
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ v2Text, scoreV1, scoreV2, boldedV2, mode, debug }),
+      body: JSON.stringify({ v2Text, scoreV1, scoreV2, boldedV2, mode, debug })
     };
   } catch(err){
-    const msg = err?.message || String(err);
-    return { statusCode: 500, body: JSON.stringify({ error: msg, debug }) };
+    return { statusCode: 500, body: JSON.stringify({ error: err?.message || String(err), debug }) };
   }
 }
