@@ -10,9 +10,10 @@ const calculateScore = (text, keywords) => {
     return (matches / keywords.length) * 100;
 };
 
-const callOpenAI = async (apiKey, systemPrompt, userPrompt, isJson = true) => {
+// NOTE: Added 'model' parameter to specify which OpenAI model to use
+const callOpenAI = async (apiKey, model, systemPrompt, userPrompt, isJson = true) => {
     const body = {
-        model: 'gpt-4o',
+        model: model, // Use the passed-in model
         messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt }
@@ -22,19 +23,36 @@ const callOpenAI = async (apiKey, systemPrompt, userPrompt, isJson = true) => {
     if (isJson) {
         body.response_format = { type: "json_object" };
     }
+    
+    // --- Logging added for better debugging ---
+    console.log(`Calling OpenAI with model: ${model}`);
+
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
     });
+
+    console.log(`OpenAI response status: ${response.status}`);
+
     if (!response.ok) {
-        const errorData = await response.json();
+        // Log error details from OpenAI for debugging
+        const errorData = await response.json().catch(() => ({ error: { message: 'Could not parse OpenAI error response.' } }));
         console.error("OpenAI API Error:", errorData);
         throw new Error(`OpenAI API call failed: ${errorData.error.message}`);
     }
+    
+    // --- Reliable JSON Parsing and Content Extraction ---
     const data = await response.json();
     const content = data.choices[0].message.content;
-    return isJson ? JSON.parse(content) : content;
+    
+    try {
+        return isJson ? JSON.parse(content) : content;
+    } catch (e) {
+        // Handles cases where the AI is asked for JSON but returns malformed text
+        console.error("Failed to JSON.parse content:", content);
+        throw new Error("AI returned malformed JSON despite instruction.");
+    }
 };
 
 
@@ -50,15 +68,20 @@ exports.handler = async function(event) {
         }
 
         // --- PASS 1: THE STRATEGIST (Keyword Extraction) ---
+        // CHANGED MODEL TO gpt-3.5-turbo FOR SPEED
+        const keywordModel = 'gpt-3.5-turbo'; 
         const keywordSystemPrompt = `You are an AI data analyst. Your sole job is to analyze the provided job description and company values to extract the 15 most important keywords and skills a candidate must have. Return a single JSON object with this structure: {"keywords": ["...", "..."]}`;
         const keywordUserPrompt = `**JOB DESCRIPTION:**\n${jobDescription}\n\n---\n\n**COMPANY VALUES & CULTURE:**\n${companyValues || 'Not provided.'}`;
-        const { keywords } = await callOpenAI(apiKey, keywordSystemPrompt, keywordUserPrompt);
+        
+        const { keywords } = await callOpenAI(apiKey, keywordModel, keywordSystemPrompt, keywordUserPrompt);
 
         if (!keywords || keywords.length === 0) {
             throw new Error("Keyword extraction failed or returned no keywords.");
         }
 
         // --- PASS 2: THE GUARDED WRITER with Word Limits ---
+        // KEEPING gpt-4o FOR HIGH-QUALITY, COMPLEX WRITING
+        const writerModel = 'gpt-4o'; 
         const writerSystemPrompt = `You are a master resume writer with strict guardrails and word limits. You will be given a candidate's full work history as a single block of text.
 
         **NON-NEGOTIABLE RULES:**
@@ -75,7 +98,7 @@ exports.handler = async function(event) {
         `;
         const writerUserPrompt = `**CRITICAL KEYWORDS TO INCLUDE:**\n${keywords.join(', ')}\n\n---\n\n**JOB DESCRIPTION (for context):**\n${jobDescription}\n\n---\n\n**CANDIDATE'S FULL EXPERIENCE INVENTORY (PRESERVE FACTS):**\n${masterInventory}`;
         
-        const finalResume = await callOpenAI(apiKey, writerSystemPrompt, writerUserPrompt, false);
+        const finalResume = await callOpenAI(apiKey, writerModel, writerSystemPrompt, writerUserPrompt, false);
         
         // --- FINAL, RELIABLE SCORING ---
         const originalScore = calculateScore(masterInventory, keywords);
@@ -93,7 +116,7 @@ exports.handler = async function(event) {
 
     } catch (error) {
         console.error('Function Error:', error);
+        // Ensure error response is always valid JSON to avoid the client-side 'Unexpected end of JSON input'
         return { statusCode: 500, body: JSON.stringify({ error: error.message || 'An internal server error occurred.' }) };
     }
 };
-
