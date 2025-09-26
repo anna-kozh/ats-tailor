@@ -69,7 +69,7 @@ exports.handler = async function(event) {
 
         // --- PASS 1: THE STRATEGIST (Keyword Extraction) ---
         // CHANGED MODEL TO gpt-3.5-turbo FOR SPEED
-        const keywordModel = 'gpt-3.5-turbo'; 
+        const keywordModel = 'gpt-5'; 
         const keywordSystemPrompt = `You are an AI data analyst. Your sole job is to analyze the provided job description and company values to extract the 15 most important keywords and skills a candidate must have. Return a single JSON object with this structure: {"keywords": ["...", "..."]}`;
         const keywordUserPrompt = `**JOB DESCRIPTION:**\n${jobDescription}\n\n---\n\n**COMPANY VALUES & CULTURE:**\n${companyValues || 'Not provided.'}`;
         
