@@ -93,6 +93,7 @@ exports.handler = async function(event) {
         6.  **Professional Summary:** Maximum 70 words and 1-2 sentences, mentionting 12 years of experience
         7.  **Work Experience:** the whole Work Experience section shouldn't be more than 300 words.
         8.  **DO NOT INVENT:** do not make up industries that are not mentioned in the Master Inventory. 
+        9. Use Australian spelling and terminology.
 
         Your final output should be a complete resume as a single block of text, starting with a powerful Professional Summary,followed by Work Experience, and then the Skills section.
         `;
