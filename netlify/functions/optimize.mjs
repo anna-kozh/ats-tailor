@@ -425,6 +425,16 @@ if (usedTotal > 0 && (usedInExperience / usedTotal) < 0.6) {
   // Optional: trigger a second writer pass with a stronger instruction or show a UI warning.
 }
 
+// --- helper to list missing keywords for UI highlight (ONLY CHANGE ADDED) ---
+function getMissingFromEval(keywords, optimizedEval){
+  const norm = s => String(s || '').toLowerCase().trim();
+  const zeroes = new Set(
+    (optimizedEval?.breakdown || [])
+      .filter(b => !b || b.contribution === 0 || !b.section)
+      .map(b => norm(b.term || b.keyword || b.name))
+  );
+  return (keywords || []).filter(k => zeroes.has(norm(k)));
+}
 
 return {
     statusCode: 200,
@@ -433,6 +443,8 @@ return {
         originalScore: originalEval.score,
         optimizedScore: optimizedEval.score,
         keywords,
+        // expose missing so UI can highlight in red
+        missing: getMissingFromEval(keywords, optimizedEval),
         originalScoreBreakdown: originalEval.breakdown,
         optimizedScoreBreakdown: optimizedEval.breakdown
     })
