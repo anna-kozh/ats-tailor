@@ -275,96 +275,103 @@ const placementPlan = await callOpenAIJSON(apiKey, 'gpt-4o', plannerSystem, plan
 
         // --- PASS 2: THE GUARDED WRITER with Word Limits ---
         // KEEPING gpt-4o FOR HIGH-QUALITY, COMPLEX WRITING
-        const writerModel = 'gpt-4o'; 
-        const writerSystemPrompt = `You are a senior resume strategist specializing in AI-assisted rewriting for high-impact design leadership roles. You will receive a candidate’s full work history as a single block of text.
+      // --- PASS 2: BULLET REWRITER (JSON, edits in place) ---
+const bullets = sections.sections.experience.map(e => e.text);
 
-**NON-NEGOTIABLE RULES**
+const bulletSchema = {
+  type:"object",
+  properties:{
+    updated_bullets:{
+      type:"array",
+      items:{
+        type:"object",
+        properties:{
+          index:{type:"integer"},
+          before:{type:"string"},
+          after:{type:"string"},
+          used_keywords:{type:"array", items:{type:"string"}}
+        },
+        required:["index","before","after"]
+      }
+    },
+    summary_additions:{ type:"array", items:{type:"string"} },
+    skills_additions:{ type:"array", items:{type:"string"} }
+  },
+  required:["updated_bullets"],
+  additionalProperties:false
+};
 
-** Preserve Facts: Parse the text into distinct jobs and keep each jobs company name, role title, and dates exactly as written.
-Do not invent or alter employers, timelines, or industries.
+const bulletSystem = `You edit only the WORK EXPERIENCE bullets, in place.
+Rules:
+- Follow the PLACEMENT PLAN strictly.
+- For target=experience with bullet_index=N: rewrite bullet N to naturally include that keyword. Keep the original claim; no new facts.
+- One keyword phrase max per bullet. No stuffing. No invented metrics, teams, tools, dates, titles.
+- If a keyword maps to summary/skills, list it in the appropriate *_additions array (once each), do not touch bullets for those.
+- Keep Australian spelling. Leadership tone. Active voice.
+- Output strict JSON per schema.`;
 
-** Rewrite Authentically
-You may rewrite the summary, bullet points, and skills — not just summary or skills.
-Use the original content as your factual base.
-Integrate relevant keywords from the job description only when theres high confidence that the candidate truly has that experience.
-Never fabricate achievements or claim ownership beyond whats supported.
-Only reuse facts that exist in the candidate text. If a keyword is not clearly supported, skip it.
+const bulletUser = `WORK EXPERIENCE BULLETS (indexed):
+${bullets.map((b,i)=>`[${i}] ${b}`).join('\n')}
 
-
-** Keyword Distribution:
-Follow the provided Placement Plan strictly.
-- If target=experience with bullet_index=N, rewrite that bullet N in place to naturally include the keyword.
-- If target=summary or skills, include that keyword once only.
-- If target=skip, do not use the keyword anywhere.
-Limit to one keyword phrase per bullet.
-Do not repeat the same keyword across bullets unless the meaning is different.
-At least 60% of used keywords must appear in Work Experience bullets.
-Do not add a keyword to Skills if it already appears in Experience.
-
-Follow the provided Placement Plan strictly:
-- If target=experience with bullet_index=N, edit that bullet to naturally include the keyword.
-- If target=summary or skills, place there only once.
-- If target=skip, do not use the keyword anywhere.
-At least 60% of used keywords must appear in Work Experience bullets.
-Do not add a keyword to Skills if it already appears in Experience.
-
-
-** Bias & Fairness Handling:
-Detect and replace biased or exclusionary wording (e.g., gendered verbs, age-coded phrases, cultural idioms) with neutral, outcome-focused alternatives.
-Keep tone inclusive, professional, and merit-based.
-Replace biased phrases (rockstar, ninja, young, native English) with neutral equivalents. Avoid culture-coded idioms.
-
-
-** Leadership Tone:
-Write with the confidence and clarity of a Lead Product Designer: ownership, impact, strategy, collaboration, and measurable outcomes.
-Avoid soft qualifiers like helped, assisted, contributed unless they describe mentorship or cross-team collaboration.
-Prefer verbs like Led, Drove, Shaped, Operationalised, Scaled. Avoid passive voice.
-
-
-** Formatting & Word Limits:
-
-*** Professional Summary: up to 70 words, 1–2 sentences, mention 12 years of experience.
-*** Freelance: 40 words
-*** Simpology: 80 words
-*** SkoolBag: 80 words
-*** ASG Group: 20 words
-*** VoiceBox: 20 words
-*** Work Experience total: ≤300 words.
-*** Use bullet points for achievements only.
-*** If over any limit, cut the lowest-value phrases first until within limits.
-
-** Skills section: at the end, capitalize each skill (e.g., Design Strategy, Human-AI Interaction, UX Research).
-
-** Style:
-Use Australian spelling.
-Keep tone clear, assertive, and concise — no filler, no self-praise.
-Avoid jargon unless it clarifies expertise.
-
-** OUTPUT FORMAT
-A single text block containing:
-*** Professional Summary
-*** Work Experience (each job with rewritten bullet points)
-*** Skills
-        `;
-const writerUserPrompt = `CRITICAL KEYWORDS (context only): 
-${keywords.join(', ')}
-
-PLACEMENT PLAN (must follow exactly):
+PLACEMENT PLAN (must follow):
 ${JSON.stringify(placementPlan, null, 2)}
 
 JOB DESCRIPTION (context only):
 ${jobDescription}
 
-CANDIDATE TEXT (facts source of truth):
-${masterInventory}
+CANDIDATE TEXT (source of truth):
+${masterInventory}`;
 
-EDIT INSTRUCTIONS:
-- Keep bullet order. For each placement with target="experience" and bullet_index=N, rewrite that bullet N in place, weaving the keyword naturally while preserving the original claim.
-- If a placement targets "summary" or "skills", include it once only.
-- If a placement is "skip", ignore that keyword entirely.
-- Never fabricate metrics, tools, titles, or ownership beyond the source text.`;
+const bulletEdits = await callOpenAIJSON(apiKey, 'gpt-4o', bulletSystem, bulletUser, bulletSchema);
 
-        const finalResume = await callOpenAI(apiKey, writerModel, writerSystemPrompt, writerUserPrompt, false);
+// --- Compose final resume text from original sections + edits ---
+function composeFinalResume(originalSections, bulletEdits) {
+  // apply bullet edits
+  const updated = [...originalSections.experience.map(e => e.text)];
+  for (const u of bulletEdits.updated_bullets) {
+    if (Number.isInteger(u.index) && u.index >= 0 && u.index < updated.length) {
+      updated[u.index] = u.after.trim();
+    }
+  }
+
+  // summary: append small, safe additions if provided (once, short)
+  let summary = (originalSections.summary || '').trim();
+  const sumAdds = (bulletEdits.summary_additions || [])
+    .map(s => s.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  if (sumAdds.length && summary.length) {
+    // add a short add-on sentence fragment
+    const add = Array.from(new Set(sumAdds)).join(', ');
+    summary = summary.replace(/\s+$/, '');
+    if (!/[.!?]$/.test(summary)) summary += '.';
+    summary += ` Focus areas: ${add}.`;
+  }
+
+  // skills: merge additions (dedupe, capitalise words)
+  const existingSkills = (originalSections.skills || '').trim();
+  const existingList = existingSkills
+    ? existingSkills.split(/\s*[,\n]\s*/).map(s => s.trim()).filter(Boolean)
+    : [];
+  const skillAdds = Array.from(new Set((bulletEdits.skills_additions || []).map(s => s.trim()).filter(Boolean)));
+  const mergedSkills = Array.from(new Set([...existingList, ...skillAdds]));
+  const skillsStr = mergedSkills.join(', ');
+
+  // build text
+  const bulletsText = updated.map(b => `• ${b}`).join('\n');
+  const out = [
+    '**Professional Summary**',
+    summary || originalSections.summary || '',
+    '',
+    '**Work Experience**',
+    bulletsText,
+    '',
+    '**Skills**',
+    skillsStr || existingSkills
+  ].join('\n');
+  return out.trim();
+}
+
         
         // --- FINAL, RELIABLE SCORING ---
         // --- FINAL, EXPLAINABLE SCORING ---
@@ -372,6 +379,7 @@ const originalMeta = parseSections(masterInventory);
 const rewrittenMeta = parseSections(finalResume);
 const jdKeywords = keywords.map(k => ({ term: k, type: 'hard' })); // MVP typing
 
+const finalResume = composeFinalResume(sections.sections, bulletEdits);
 const originalEval = scoreResume(masterInventory, jdKeywords, originalMeta);
 const optimizedEval = scoreResume(finalResume, jdKeywords, rewrittenMeta);
 
