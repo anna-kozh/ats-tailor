@@ -9,7 +9,7 @@ const stem = s => s
   .replace(/\b(ing|ed|es|s)\b/g,'');
 
 const WINDOW = 8;
-const SECTION_MULT = { experience: 1.3, summary: 1.0, skills: 0.7 };
+const SECTION_MULT = { experience: 1.3, summary: 1.0, skills: 0.5 };
 
 function windowHasAll(tokens, terms, w = WINDOW) {
   const idxs = terms.map(t => tokens.indexOf(t));
@@ -390,11 +390,23 @@ Summary: 20-25%
 Each job: Total  50-60%
 Skills: 25-30%
 
+** SKILLS DISCIPLINE (HARD CAP)
+- Max 12–14 items.
+- Only include: (a) items explicitly marked target="skills" in the plan, OR
+  (b) items clearly evidenced in EXPERIENCE/SUMMARY (exact term or strong synonym).
+- Do NOT mirror items already present in EXPERIENCE.
+- Collapse synonyms to one canonical form (e.g., “UX” vs “User Experience” → pick one).
+- Remove generic fluff (e.g., “Team Player”, “Hard Working”).
+- If over the cap, keep the most job-relevant, de-duplicate, and drop the rest.
+
+
 ** Bias & Fairness Handling:
 Detect and replace biased or exclusionary wording (e.g., gendered verbs, age-coded phrases, cultural idioms) with neutral, outcome-focused alternatives.
 Keep tone inclusive, professional, and merit-based.
 Replace biased phrases (rockstar, ninja, young, native English) with neutral equivalents. Avoid culture-coded idioms.
-
+- Inclusive, outcome-focused. No culture-coded idioms.
+- Leadership verbs: Led, Drove, Shaped, Operationalised, Scaled.
+- Australian spelling.
 
 ** Leadership Tone:
 Write with the confidence and clarity of a Lead Product Designer: ownership, impact, strategy, collaboration, and measurable outcomes.
@@ -425,7 +437,8 @@ Avoid jargon unless it clarifies expertise.
 A single text block containing:
 *** Professional Summary
 *** Work Experience (each job with rewritten bullet points)
-*** Skills
+*** Skills (final list, title-cased)
+
         `;
         const writerUserPrompt = `**CRITICAL KEYWORDS TO INCLUDE:**\n${keywords.join(', ')}\n\n---\n\n**JOB DESCRIPTION (for context):**\n${jobDescription}\n\n---\n\n**CANDIDATE'S FULL EXPERIENCE INVENTORY (PRESERVE FACTS):**\n${masterInventory}`;
         
