@@ -1,257 +1,250 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Resume Optimizer & Scorer</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        body { font-family: 'Inter', sans-serif; }
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: #1f2937; }
-        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
-        .ai-output-container pre { white-space: pre-wrap; word-wrap: break-word; }
-        #loader svg { animation: spin 1s linear infinite; }
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        .score-gauge {
-            width: 120px;
-            height: 120px;
-            border-radius: 50%;
-            display: grid;
-            place-items: center;
-            background-color: #374151;
-            transition: background 1s ease-in-out;
-        }
-        .score-gauge-inner {
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            background: #1f2937;
-            display: grid;
-            place-items: center;
-            font-size: 1.5rem;
-            font-weight: bold;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AI Resume Optimizer & Scorer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #1f2937; }
+    ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+    .ai-output-container pre { white-space: pre-wrap; word-wrap: break-word; }
+    #loader svg { animation: spin 1s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .score-gauge { width: 120px; height: 120px; border-radius: 50%; display: grid; place-items: center; background-color: #374151; transition: background 1s ease-in-out; }
+    .score-gauge-inner { width: 100px; height: 100px; border-radius: 50%; background: #1f2937; display: grid; place-items: center; font-size: 1.5rem; font-weight: bold; }
+  </style>
 </head>
 <body class="bg-gray-900 text-gray-200 min-h-screen flex flex-col items-center justify-center p-4">
-    <div class="w-full max-w-7xl mx-auto">
-        <div class="text-center mb-8">
-            <h1 class="text-3xl md:text-4xl font-bold text-white">Strategic Resume Optimizer</h1>
-            <p class="text-gray-400 mt-2">The AI will analyze skills, culture, and values to achieve maximum alignment.</p>
-        </div>
-        <div id="scoreboard" class="hidden mb-6 bg-gray-800 rounded-2xl p-6">
-            <h2 class="text-2xl font-bold text-center mb-4 text-white">Alignment Analysis</h2>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-                <div class="text-center flex flex-col items-center">
-                    <h3 class="text-lg font-semibold text-gray-300 mb-2">Inventory Score</h3>
-                    <div id="original-score-gauge" class="score-gauge"><div id="original-score-text" class="score-gauge-inner">0%</div></div>
-                </div>
-                <div class="text-center">
-                    <div class="flex items-center justify-center gap-3 mb-2">
-                        <h3 class="text-lg font-semibold text-gray-300">Keywords Analyzed</h3>
-                        <div class="flex items-center gap-2 text-xs">
-                            <span class="inline-block h-2 w-2 rounded-full bg-red-500"></span><span class="text-gray-400">Skipped</span>
-                        </div>
-                    </div>
-                    <div id="keywords-list" class="flex flex-wrap justify-center gap-2 p-2 bg-gray-900 rounded-lg max-h-32 overflow-y-auto"></div>
-                </div>
-                <div class="text-center flex flex-col items-center">
-                    <h3 class="text-lg font-semibold text-gray-300 mb-2">Final Score</h3>
-                    <div id="optimized-score-gauge" class="score-gauge"><div id="optimized-score-text" class="score-gauge-inner">0%</div></div>
-                </div>
-            </div>
-        </div>
-        <div class="w-full bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8">
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div class="flex flex-col gap-4">
-                    <div>
-                        <label for="resume-input" class="block text-sm font-medium text-gray-300 mb-2">1. Master Experience Inventory</label>
-                        <textarea id="resume-input" rows="14" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 text-sm focus:ring-2 focus:ring-blue-500" placeholder="Paste your entire Master Experience Inventory here... The more detail, the better."></textarea>
-                    </div>
-                    <div>
-                        <label for="job-desc-input" class="block text-sm font-medium text-gray-300 mb-2">2. The Job Description</label>
-                        <textarea id="job-desc-input" rows="14" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 text-sm focus:ring-2 focus:ring-blue-500" placeholder="Paste the target job description here..."></textarea>
-                    </div>
-                    <div>
-                        <label for="company-values-input" class="block text-sm font-medium text-gray-300 mb-2">3. Company Values & Culture (Optional, but key for 90%+ scores)</label>
-                        <textarea id="company-values-input" rows="8" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 text-sm focus:ring-2 focus:ring-blue-500" placeholder="Paste the company's mission, values, or 'About Us' section here. E.g., 'Raising the BAARS in Healthcare' principles."></textarea>
-                    </div>
-                </div>
-                <div class="flex flex-col">
-                    <div class="flex justify-between items-center mb-2">
-                        <label class="block text-sm font-medium text-gray-300">4. Final Optimized Resume</label>
-                        <button id="copy-btn" class="text-sm bg-gray-600 hover:bg-gray-500 text-white font-semibold py-1 px-3 rounded-md hidden">Copy</button>
-                    </div>
-                    <div class="w-full h-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-sm ai-output-container overflow-y-auto" style="min-height: 400px;">
-                        <div id="placeholder" class="text-gray-500 h-full flex items-center justify-center">Your final, auto-refined resume will appear here...</div>
-                        <div id="loader" class="hidden h-full flex flex-col items-center justify-center text-center">
-                            <svg class="h-8 w-8 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                            <p id="loader-text" class="mt-4 text-gray-400">Performing holistic analysis... This may take up to 30 seconds.</p>
-                        </div>
-                        <pre id="result" class="text-gray-200"></pre>
-                    </div>
-                </div>
-            </div>
-            <div class="mt-6 text-center">
-                <button id="generate-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-lg transform hover:scale-105 shadow-lg">Optimize My Resume</button>
-            </div>
-            <div id="error-box" class="hidden mt-4 bg-red-900 border border-red-700 text-red-200 px-4 py-3 rounded-lg" role="alert">
-                <strong class="font-bold">Error:</strong>
-                <span id="error-message" class="block sm:inline"></span>
-            </div>
-        </div>
+  <div class="w-full max-w-7xl mx-auto">
+    <div class="text-center mb-8">
+      <h1 class="text-3xl md:text-4xl font-bold text-white">Strategic Resume Optimizer</h1>
+      <p class="text-gray-400 mt-2">The AI will analyze skills, culture, and values to achieve maximum alignment.</p>
     </div>
-    <script>
-        const generateBtn = document.getElementById('generate-btn');
-        const loader = document.getElementById('loader');
-        const resultPre = document.getElementById('result');
-        const copyBtn = document.getElementById('copy-btn');
-        const errorBox = document.getElementById('error-box');
-        const errorMessage = document.getElementById('error-message');
-        const scoreboard = document.getElementById('scoreboard');
-        const originalScoreGauge = document.getElementById('original-score-gauge');
-        const originalScoreText = document.getElementById('original-score-text');
-        const optimizedScoreGauge = document.getElementById('optimized-score-gauge');
-        const optimizedScoreText = document.getElementById('optimized-score-text');
-        const keywordsList = document.getElementById('keywords-list');
 
-        generateBtn.addEventListener('click', startOptimization);
-        copyBtn.addEventListener('click', copyToClipboard);
+    <!-- SCOREBOARD -->
+    <div id="scoreboard" class="hidden mb-6 bg-gray-800 rounded-2xl p-6">
+      <h2 class="text-2xl font-bold text-center mb-4 text-white">Alignment Analysis</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+        <div class="text-center flex flex-col items-center">
+          <h3 class="text-lg font-semibold text-gray-300 mb-2">Inventory Score</h3>
+          <div id="original-score-gauge" class="score-gauge">
+            <div id="original-score-text" class="score-gauge-inner">0%</div>
+          </div>
+        </div>
 
-        async function startOptimization() {
-            const resumeText = document.getElementById('resume-input').value.trim();
-            const jobDescription = document.getElementById('job-desc-input').value.trim();
-            const companyValues = document.getElementById('company-values-input').value.trim();
+        <div class="text-center">
+          <div class="flex items-center justify-center gap-3 mb-2">
+            <h3 class="text-lg font-semibold text-gray-300">Keywords Analyzed</h3>
+            <div class="flex items-center gap-3 text-xs">
+              <span class="inline-flex items-center gap-1 text-gray-400">
+                <span class="inline-block h-2 w-2 rounded-full bg-gray-500"></span>
+                Present
+              </span>
+              <span class="inline-flex items-center gap-1 text-gray-400">
+                <span class="inline-block h-2 w-2 rounded-full bg-red-500"></span>
+                Missing
+              </span>
+            </div>
+          </div>
+          <div id="keywords-list" class="flex flex-wrap justify-center gap-2 p-2 bg-gray-900 rounded-lg max-h-40 overflow-y-auto"></div>
+        </div>
 
-            if (!resumeText || !jobDescription) {
-                showError("Please paste your Experience Inventory and the Job Description.");
-                return;
-            }
-            
-            hideError();
-            setLoadingState(true);
+        <div class="text-center flex flex-col items-center">
+          <h3 class="text-lg font-semibold text-gray-300 mb-2">Final Score</h3>
+          <div id="optimized-score-gauge" class="score-gauge">
+            <div id="optimized-score-text" class="score-gauge-inner">0%</div>
+          </div>
+        </div>
+      </div>
+    </div>
 
-            try {
-                const response = await fetch('/.netlify/functions/optimize', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ resumeText, jobDescription, companyValues })
-                });
-                
-                const data = await response.json();
-                if (!response.ok) throw new Error(data.error || 'The optimization process failed.');
-                
-                resultPre.textContent = data.optimizedResume;
-                copyBtn.classList.remove('hidden');
-                scoreboard.classList.remove('hidden');
-                
-                updateScoreGauge(originalScoreGauge, originalScoreText, data.originalScore);
-                updateScoreGauge(optimizedScoreGauge, optimizedScoreText, data.optimizedScore);
-                // Pass full response so we can mark skipped
-                renderKeywords(data.keywords, data);
+    <!-- INPUT / OUTPUT -->
+    <div class="w-full bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="flex flex-col gap-4">
+          <div>
+            <label for="resume-input" class="block text-sm font-medium text-gray-300 mb-2">1. Master Experience Inventory</label>
+            <textarea id="resume-input" rows="14" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 text-sm focus:ring-2 focus:ring-blue-500" placeholder="Paste your entire Master Experience Inventory here..."></textarea>
+          </div>
+          <div>
+            <label for="job-desc-input" class="block text-sm font-medium text-gray-300 mb-2">2. The Job Description</label>
+            <textarea id="job-desc-input" rows="14" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 text-sm focus:ring-2 focus:ring-blue-500" placeholder="Paste the target job description here..."></textarea>
+          </div>
+          <div>
+            <label for="company-values-input" class="block text-sm font-medium text-gray-300 mb-2">3. Company Values & Culture (Optional)</label>
+            <textarea id="company-values-input" rows="8" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-4 text-sm focus:ring-2 focus:ring-blue-500" placeholder="Paste the company's mission, values, or About Us here."></textarea>
+          </div>
+        </div>
 
-            } catch (error) {
-                console.error("Error:", error);
-                showError(error.message);
-            } finally {
-                setLoadingState(false);
-            }
-        }
-        
-        function updateScoreGauge(gaugeElement, textElement, score) {
-            let currentScore = 0;
-            const targetScore = Math.round(score);
-            textElement.textContent = `0%`;
-            gaugeElement.style.background = '#374151';
-            if (targetScore === 0) return;
-            const interval = setInterval(() => {
-                currentScore++;
-                const color = getScoreColor(currentScore);
-                gaugeElement.style.background = `conic-gradient(${color} ${currentScore * 3.6}deg, #374151 ${currentScore * 3.6}deg)`;
-                textElement.textContent = `${currentScore}%`;
-                if (currentScore >= targetScore) clearInterval(interval);
-            }, 20);
-        }
+        <div class="flex flex-col">
+          <div class="flex justify-between items-center mb-2">
+            <label class="block text-sm font-medium text-gray-300">4. Final Optimized Resume</label>
+            <button id="copy-btn" class="text-sm bg-gray-600 hover:bg-gray-500 text-white font-semibold py-1 px-3 rounded-md hidden">Copy</button>
+          </div>
+          <div class="w-full h-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-sm ai-output-container overflow-y-auto" style="min-height: 400px;">
+            <div id="placeholder" class="text-gray-500 h-full flex items-center justify-center">Your final, auto-refined resume will appear here...</div>
+            <div id="loader" class="hidden h-full flex flex-col items-center justify-center text-center">
+              <svg class="h-8 w-8 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <p id="loader-text" class="mt-4 text-gray-400">Performing holistic analysis...</p>
+            </div>
+            <pre id="result" class="text-gray-200"></pre>
+          </div>
+        </div>
+      </div>
 
-        function getScoreColor(score) {
-            if (score < 50) return '#ef4444';
-            if (score < 80) return '#f59e0b';
-            return '#22c55e';
-        }
+      <div class="mt-6 text-center">
+        <button id="generate-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-lg transform hover:scale-105 shadow-lg">Optimize My Resume</button>
+      </div>
 
-        // NEW: derive skipped keywords from various possible payloads
-        function getSkippedSet(data) {
-            const s = new Set();
-            // Preferred: placements with target === 'skip'
-            if (Array.isArray(data.placements)) {
-                data.placements.forEach(p => {
-                    if (p && (p.target === 'skip' || p.confidence === 'low')) s.add(normalizeKey(p.keyword));
-                });
-            }
-            // Or explicit missing list
-            if (Array.isArray(data.missing)) {
-                data.missing.forEach(k => s.add(normalizeKey(k)));
-            }
-            // Or scorer breakdown entries with no contribution/section
-            if (Array.isArray(data.optimizedScoreBreakdown)) {
-                data.optimizedScoreBreakdown.forEach(b => {
-                    const name = b.term || b.keyword || b.name;
-                    if (!name) return;
-                    if (!b.section || b.contribution === 0) s.add(normalizeKey(name));
-                });
-            }
-            return s;
-        }
+      <div id="error-box" class="hidden mt-4 bg-red-900 border border-red-700 text-red-200 px-4 py-3 rounded-lg" role="alert">
+        <strong class="font-bold">Error:</strong>
+        <span id="error-message" class="block sm:inline"></span>
+      </div>
+    </div>
+  </div>
 
-        function normalizeKey(k) { return String(k || '').trim().toLowerCase(); }
+  <script>
+    const generateBtn = document.getElementById('generate-btn');
+    const loader = document.getElementById('loader');
+    const resultPre = document.getElementById('result');
+    const copyBtn = document.getElementById('copy-btn');
+    const errorBox = document.getElementById('error-box');
+    const errorMessage = document.getElementById('error-message');
+    const scoreboard = document.getElementById('scoreboard');
+    const originalScoreGauge = document.getElementById('original-score-gauge');
+    const originalScoreText = document.getElementById('original-score-text');
+    const optimizedScoreGauge = document.getElementById('optimized-score-gauge');
+    const optimizedScoreText = document.getElementById('optimized-score-text');
+    const keywordsList = document.getElementById('keywords-list');
 
-        function renderKeywords(keywords, data) {
-            const skipped = getSkippedSet(data);
-            keywordsList.innerHTML = (keywords || []).map(kw => {
-                const isSkipped = skipped.has(normalizeKey(kw));
-                const base = 'text-xs font-medium px-2.5 py-1 rounded-full border';
-                const cls = isSkipped
-                  ? 'bg-red-900 text-red-200 border-red-700'
-                  : 'bg-gray-700 text-gray-300 border-gray-600';
-                const title = isSkipped ? 'Skipped (no evidence found)' : 'Mapped/used';
-                return `<span class="${base} ${cls}" title="${title}">${kw}</span>`;
-            }).join('');
-        }
+    generateBtn.addEventListener('click', startOptimization);
+    copyBtn.addEventListener('click', copyToClipboard);
 
-        function setLoadingState(isLoading) {
-            const placeholder = document.getElementById('placeholder');
-            if (isLoading) {
-                scoreboard.classList.add('hidden');
-                placeholder.classList.add('hidden');
-                resultPre.textContent = '';
-                loader.classList.remove('hidden');
-                copyBtn.classList.add('hidden');
-                generateBtn.disabled = true;
-                generateBtn.textContent = 'Optimizing...';
-                generateBtn.classList.add('bg-gray-600', 'cursor-not-allowed');
-                generateBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
-            } else {
-                loader.classList.add('hidden');
-                generateBtn.disabled = false;
-                generateBtn.textContent = 'Optimize My Resume';
-                generateBtn.classList.remove('bg-gray-600', 'cursor-not-allowed');
-                generateBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
-            }
-        }
+    async function startOptimization() {
+      const resumeText = document.getElementById('resume-input').value.trim();
+      const jobDescription = document.getElementById('job-desc-input').value.trim();
+      const companyValues = document.getElementById('company-values-input').value.trim();
 
-        function copyToClipboard() {
-            navigator.clipboard.writeText(resultPre.textContent).then(() => {
-                copyBtn.textContent = 'Copied!';
-                setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
-            });
-        }
-        function showError(message) { errorMessage.textContent = message; errorBox.classList.remove('hidden'); }
-        function hideError() { errorBox.classList.add('hidden'); }
-    </script>
+      if (!resumeText || !jobDescription) {
+        showError("Please paste your Experience Inventory and the Job Description.");
+        return;
+      }
+
+      hideError();
+      setLoadingState(true);
+
+      try {
+        const response = await fetch('/.netlify/functions/optimize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resumeText, jobDescription, companyValues })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'The optimization process failed.');
+
+        resultPre.textContent = data.optimizedResume;
+        copyBtn.classList.remove('hidden');
+        scoreboard.classList.remove('hidden');
+
+        updateScoreGauge(originalScoreGauge, originalScoreText, data.originalScore);
+        updateScoreGauge(optimizedScoreGauge, optimizedScoreText, data.optimizedScore);
+
+        // Highlight missing keywords in red using the `missing` array from the function response
+        renderKeywords(data.keywords, data.missing);
+
+      } catch (error) {
+        console.error("Error:", error);
+        showError(error.message);
+      } finally {
+        setLoadingState(false);
+      }
+    }
+
+    function updateScoreGauge(gaugeElement, textElement, score) {
+      let currentScore = 0;
+      const targetScore = Math.round(score);
+      textElement.textContent = `0%`;
+      gaugeElement.style.background = '#374151';
+      if (targetScore === 0) return;
+
+      const interval = setInterval(() => {
+        currentScore++;
+        const color = getScoreColor(currentScore);
+        gaugeElement.style.background = `conic-gradient(${color} ${currentScore * 3.6}deg, #374151 ${currentScore * 3.6}deg)`;
+        textElement.textContent = `${currentScore}%`;
+        if (currentScore >= targetScore) clearInterval(interval);
+      }, 20);
+    }
+
+    function getScoreColor(score) {
+      if (score < 50) return '#ef4444';
+      if (score < 80) return '#f59e0b';
+      return '#22c55e';
+    }
+
+    // Render keyword pills; red if missing
+    function renderKeywords(keywords = [], missing = []) {
+      const norm = s => String(s || '').toLowerCase().trim();
+      const missingSet = new Set(missing.map(norm));
+
+      keywordsList.innerHTML = keywords.map(kw => {
+        const isMissing = missingSet.has(norm(kw));
+        const base = 'text-xs font-medium px-2.5 py-1 rounded-full border';
+        const cls = isMissing
+          ? 'bg-red-900 text-red-200 border-red-700'
+          : 'bg-gray-700 text-gray-300 border-gray-600';
+        const title = isMissing ? 'Missing in updated resume' : 'Present in updated resume';
+        return `<span class="${base} ${cls}" title="${title}">${kw}</span>`;
+      }).join('');
+    }
+
+    function setLoadingState(isLoading) {
+      const placeholder = document.getElementById('placeholder');
+      if (isLoading) {
+        scoreboard.classList.add('hidden');
+        placeholder.classList.add('hidden');
+        resultPre.textContent = '';
+        loader.classList.remove('hidden');
+        copyBtn.classList.add('hidden');
+        generateBtn.disabled = true;
+        generateBtn.textContent = 'Optimizing...';
+        generateBtn.classList.add('bg-gray-600', 'cursor-not-allowed');
+        generateBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+      } else {
+        loader.classList.add('hidden');
+        generateBtn.disabled = false;
+        generateBtn.textContent = 'Optimize My Resume';
+        generateBtn.classList.remove('bg-gray-600', 'cursor-not-allowed');
+        generateBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+      }
+    }
+
+    function copyToClipboard() {
+      navigator.clipboard.writeText(resultPre.textContent).then(() => {
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+      });
+    }
+
+    function showError(message) {
+      errorMessage.textContent = message;
+      errorBox.classList.remove('hidden');
+    }
+
+    function hideError() {
+      errorBox.classList.add('hidden');
+    }
+  </script>
 </body>
 </html>

@@ -236,11 +236,33 @@ const sections = parseSections(masterInventory);
 const plannerSystem = `You are mapping JD keywords to the candidate's existing WORK EXPERIENCE bullets.
 Create a placement plan that maximises truthful keyword coverage in EXPERIENCE first, then Summary or Skills only if needed.
 
+
 HOW TO THINK
 1) Build semantic clusters on the fly for each JD keyword using JD context and common variations.
    - Include synonyms, abbreviations, plural/singular, close paraphrases, and role-specific phrasing.
    - Example pattern: “project management” → “PM”, “program management”, “roadmapping”, “delivery management”.
 2) Use evidence from the resume. Do not invent facts. Prefer explicit matches. Allow strong implication when activities prove the concept.
+
+SEMANTIC EXPANSION RULE:
+When building cluster_variants for each keyword, automatically include semantically related and domain-equivalent terms.
+
+Use vector or lexical similarity, professional usage, and role-specific context to infer equivalence.
+Example:
+- "dynamic teams" → agile, cross-functional, startup, fast-paced, lean
+- "responsible AI" → ethical AI, AI ethics, AI safety, fairness, bias mitigation
+- "AI-enabled design" → AI-powered design, intelligent design tools, generative UX
+- "cross-functional collaboration" → co-design, multidisciplinary, partnership with dev/product
+- "algorithmic bias" → fairness, bias mitigation, inclusive AI
+
+Treat these as *cluster_variants*.
+Confidence:
+- High if meaning and context align exactly (responsible AI ↔ ethical AI)
+- Medium if approximate or context-dependent (dynamic teams ↔ startup culture)
+
+
+Use embedding similarity threshold ≥0.75 to identify cluster_variants.
+
+
 
 INFERENCE LADDER
 - HIGH confidence:
