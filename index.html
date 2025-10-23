@@ -161,53 +161,42 @@
         updateScoreGauge(optimizedScoreGauge, optimizedScoreText, data.optimizedScore);
 
         // Highlight missing keywords in red using the `missing` array from the function response
-        renderKeywords(data.keywords, data.missing);
+   function renderKeywords(keywords = [], missing = [], optimizedText = '') {
+  const norm = s => String(s || '').toLowerCase().trim();
+  const missingSet = new Set((missing || []).map(norm));
+  const hay = String(optimizedText || '').toLowerCase();
 
-      } catch (error) {
-        console.error("Error:", error);
-        showError(error.message);
-      } finally {
-        setLoadingState(false);
-      }
+  // exact-ish phrase check: ignore multiple spaces/hyphens, be case-insensitive
+  const containsPhrase = (text, phrase) => {
+    const esc = phrase.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+    // allow spaces or hyphens between words, keep word-ish boundaries on letters/numbers
+    const pattern = esc
+      .replace(/\s+/g, '[\\s-]+')         // multiword: space or hyphen
+      .replace(/([a-zA-Z0-9])/g, '(?<$1>\\b$1\\b)') // keep loose word boundaries on alnum
+      .replace(/\(\?<([^)]+)>\b([^)]+)\b\)/g, '$2'); // clean up named groups (safari safety)
+    try {
+      const re = new RegExp(pattern, 'i');
+      return re.test(text);
+    } catch {
+      // fallback: simple case-insensitive includes
+      return text.includes(norm(phrase));
     }
+  };
 
-    function updateScoreGauge(gaugeElement, textElement, score) {
-      let currentScore = 0;
-      const targetScore = Math.round(score);
-      textElement.textContent = `0%`;
-      gaugeElement.style.background = '#374151';
-      if (targetScore === 0) return;
+  keywordsList.innerHTML = keywords.map(kw => {
+    const isMissing =
+      missingSet.has(norm(kw)) ||
+      !containsPhrase(hay, kw);
 
-      const interval = setInterval(() => {
-        currentScore++;
-        const color = getScoreColor(currentScore);
-        gaugeElement.style.background = `conic-gradient(${color} ${currentScore * 3.6}deg, #374151 ${currentScore * 3.6}deg)`;
-        textElement.textContent = `${currentScore}%`;
-        if (currentScore >= targetScore) clearInterval(interval);
-      }, 20);
-    }
+    const base = 'text-xs font-medium px-2.5 py-1 rounded-full border';
+    const cls = isMissing
+      ? 'bg-red-900 text-red-200 border-red-700'
+      : 'bg-gray-700 text-gray-300 border-gray-600';
+    const title = isMissing ? 'Missing in updated resume' : 'Present in updated resume';
+    return `<span class="${base} ${cls}" title="${title}">${kw}</span>`;
+  }).join('');
+}
 
-    function getScoreColor(score) {
-      if (score < 50) return '#ef4444';
-      if (score < 80) return '#f59e0b';
-      return '#22c55e';
-    }
-
-    // Render keyword pills; red if missing
-    function renderKeywords(keywords = [], missing = []) {
-      const norm = s => String(s || '').toLowerCase().trim();
-      const missingSet = new Set(missing.map(norm));
-
-      keywordsList.innerHTML = keywords.map(kw => {
-        const isMissing = missingSet.has(norm(kw));
-        const base = 'text-xs font-medium px-2.5 py-1 rounded-full border';
-        const cls = isMissing
-          ? 'bg-red-900 text-red-200 border-red-700'
-          : 'bg-gray-700 text-gray-300 border-gray-600';
-        const title = isMissing ? 'Missing in updated resume' : 'Present in updated resume';
-        return `<span class="${base} ${cls}" title="${title}">${kw}</span>`;
-      }).join('');
-    }
 
     function setLoadingState(isLoading) {
       const placeholder = document.getElementById('placeholder');
