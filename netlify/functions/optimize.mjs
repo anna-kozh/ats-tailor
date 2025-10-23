@@ -235,6 +235,7 @@ exports.handler = async function(event) {
 const sections = parseSections(masterInventory);
 const plannerSystem = `You are mapping JD keywords to the candidate's existing WORK EXPERIENCE bullets.
 Rules:
+- Treat related terms as semantic equivalents, e.g.:  "UX design", "user experience", "UX", "user-centered design", "design thinking", "usability design" → all count as one cluster. "AI transparency", "explainable AI", "trust and safety", "AI explainability" → same cluster.
 - Prefer mapping to an existing bullet in WORK EXPERIENCE when evidence exists and confidence is high or medium.
 - Only map to Summary/Skills if there is no suitable bullet, but confidence still needs to be high or medium.
 - If no evidence (low confidence) for a keyword anywhere, mark as "skip".
@@ -300,9 +301,9 @@ Limit to one keyword phrase per bullet.
 Do not repeat the same keyword across bullets unless the meaning is different.
 Do not add a keyword to Skills if it already appears in Experience.
 
-** Ideal keyword distribution:
+** Aim for this keyword distribution:
 Summary: 20-25%
-Each job (on average): Total  50-60%
+Each job: Total  50-60%
 Skills: 25-30%
 
 ** Bias & Fairness Handling:
