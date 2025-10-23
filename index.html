@@ -194,35 +194,33 @@
     }
 
     // GLOBAL: render keyword pills; red if missing or phrase not found
-    function renderKeywords(keywords = [], missing = [], optimizedText = '') {
-      const norm = s => String(s || '').toLowerCase().trim();
-      const missingSet = new Set((missing || []).map(norm));
-      const hay = String(optimizedText || '').toLowerCase();
+ function renderKeywords(keywords = [], missing = [], optimizedText = '') {
+  // normalise text: lower, strip punctuation, collapse spaces
+  const norm = s => String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
 
-      const containsPhrase = (text, phrase) => {
-        const esc = phrase.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-        const pattern = esc
-          .replace(/\s+/g, '[\\s-]+')
-          .replace(/([a-zA-Z0-9])/g, '(?<$1>\\b$1\\b)')
-          .replace(/\(\?<([^)]+)>\b([^)]+)\b\)/g, '$2');
-        try {
-          const re = new RegExp(pattern, 'i');
-          return re.test(text);
-        } catch {
-          return text.includes(norm(phrase));
-        }
-      };
+  const textNorm = norm(optimizedText);
+  const missingSet = new Set((missing || []).map(norm));
 
-      keywordsList.innerHTML = (keywords || []).map(kw => {
-        const isMissing = missingSet.has(norm(kw)) || !containsPhrase(hay, kw);
-        const base = 'text-xs font-medium px-2.5 py-1 rounded-full border';
-        const cls = isMissing
-          ? 'bg-red-900 text-red-200 border-red-700'
-          : 'bg-gray-700 text-gray-300 border-gray-600';
-        const title = isMissing ? 'Missing in updated resume' : 'Present in updated resume';
-        return `<span class="${base} ${cls}" title="${title}">${kw}</span>`;
-      }).join('');
-    }
+  keywordsList.innerHTML = (keywords || []).map(kw => {
+    const kNorm = norm(kw);
+
+    // mark red if backend says missing OR phrase not found in the updated resume
+    const isMissing = missingSet.has(kNorm) || !textNorm.includes(kNorm);
+
+    const base = 'text-xs font-medium px-2.5 py-1 rounded-full border';
+    const cls  = isMissing
+      ? 'bg-red-900 text-red-200 border-red-700'
+      : 'bg-gray-700 text-gray-300 border-gray-600';
+    const title = isMissing ? 'Missing in updated resume' : 'Present in updated resume';
+
+    return `<span class="${base} ${cls}" title="${title}">${kw}</span>`;
+  }).join('');
+}
+
 
     function setLoadingState(isLoading) {
       const placeholder = document.getElementById('placeholder');
