@@ -234,12 +234,74 @@ exports.handler = async function(event) {
 // --- PASS 1b: PLACEMENT PLANNER (map keywords to specific bullets) ---
 const sections = parseSections(masterInventory);
 const plannerSystem = `You are mapping JD keywords to the candidate's existing WORK EXPERIENCE bullets.
-Rules:
-- Treat related terms as semantic equivalents, e.g.:  "UX design", "user experience", "UX", "user-centered design", "design thinking", "usability design" → all count as one cluster. "AI transparency", "explainable AI", "trust and safety", "AI explainability" → same cluster.
-- Prefer mapping to an existing bullet in WORK EXPERIENCE when evidence exists and confidence is high or medium.
-- Only map to Summary/Skills if there is no suitable bullet, but confidence still needs to be high or medium.
-- If no evidence (low confidence) for a keyword anywhere, mark as "skip".
-- Never invent facts.`;
+Create a placement plan that maximises truthful keyword coverage in EXPERIENCE first, then Summary or Skills only if needed.
+
+HOW TO THINK
+1) Build semantic clusters on the fly for each JD keyword using JD context and common variations.
+   - Include synonyms, abbreviations, plural/singular, close paraphrases, and role-specific phrasing.
+   - Example pattern: “project management” → “PM”, “program management”, “roadmapping”, “delivery management”.
+2) Use evidence from the resume. Do not invent facts. Prefer explicit matches. Allow strong implication when activities prove the concept.
+
+INFERENCE LADDER
+- HIGH confidence:
+  - Exact keyword in the bullet, or an unambiguous synonym from the cluster.
+  - Or activity that directly demonstrates the concept (e.g., for security → threat modeling, audits; for sales → quota attainment; for data → SQL queries, model training; for design → usability testing, IA; for ops → SLAs, incident response; for marketing → campaign metrics).
+- MEDIUM confidence:
+  - Strong implication through tasks, outputs, or metrics that normally require the concept.
+  - Title + activity pairing that makes the concept very likely.
+- LOW confidence → SKIP:
+  - Title alone without supporting action.
+  - Vague phrasing like “exposure to”.
+  - Future intent or unrelated context.
+
+DISAMBIGUATION
+- Match meaning, not string. Ignore homonyms if context differs.
+- Beware near misses (e.g., “systems design” vs “design systems”, “research” vs “market research” if the JD means user research).
+- Handle abbreviations and regional spelling.
+- Negation: if the evidence span contains “no”, “not”, “without”, “lack”, “only exposure”, do not count.
+
+MAPPING RULES
+- Prefer EXPERIENCE bullets. Only use Summary/Skills if no suitable bullet with ≥ medium confidence.
+- One keyword per bullet. Do not double-assign a bullet.
+- Spread across roles. Avoid stacking more than three keywords in one role unless there are many bullets.
+- Quote the exact evidence substring from the resume.
+- If the match uses a cluster synonym, set confidence=medium unless the synonym is unambiguous and direct, then high.
+- If nothing reaches ≥ medium confidence, set target="skip".
+
+CLUSTERING INSTRUCTIONS (generate per keyword)
+For each JD keyword:
+- Produce 3–8 close variants and role-specific phrasings based on the JD domain.
+- Include metric or artifact proxies that imply the concept (e.g., for leadership → “led X”, “mentored”, “headcount”, “OKRs”, “RACI”; for compliance → “audit”, “policy”, “ISO”, “SOC”, “GDPR”; for data → “SQL”, “dashboards”, “A/B test”, “ROC/AUC”; for engineering → “CI/CD”, “SLA/SLO”, “latency”, “throughput”; for product → “roadmap”, “PRD”, “release”, “impact metrics”).
+- Use these variants when scanning bullets. Match only when context fits.
+
+SECTION PREFERENCE
+- EXPERIENCE > SUMMARY > SKILLS.
+- If mapped to Summary or Skills, include once only.
+
+
+OUTPUT JSON (strict)
+{
+  "placements": [
+    {
+      "keyword": "string",
+      "cluster_variants": ["v1","v2","v3"],    // the variants you actually used to match
+      "target": "experience|summary|skills|skip",
+      "bullet_index": number|null,             // index within flattened experience bullets
+      "evidence": "exact quote from resume bullet or ''",
+      "confidence": "high|medium|low",
+      "reason": "short why this mapping is valid (or why skipped)"
+    }
+  ]
+}
+
+PROCESS
+1) For each keyword, build cluster_variants from JD context.
+2) Scan EXPERIENCE bullets: exact → synonym → activity proxy. Pick the highest-confidence, most recent bullet.
+3) If no ≥ medium in EXPERIENCE, try Summary then Skills.
+4) If still no ≥ medium, mark skip.
+
+
+`;
 const plannerUser = `KEYWORDS: ${keywords.join(', ')}
 
 WORK EXPERIENCE BULLETS:
