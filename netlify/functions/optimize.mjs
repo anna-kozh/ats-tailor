@@ -324,6 +324,12 @@ ${masterInventory}`;
 
 const bulletEdits = await callOpenAIJSON(apiKey, 'gpt-4o', bulletSystem, bulletUser, bulletSchema);
 
+// defaults to avoid crashes if model returns minimal JSON
+bulletEdits.updated_bullets = Array.isArray(bulletEdits.updated_bullets) ? bulletEdits.updated_bullets : [];
+bulletEdits.summary_additions = Array.isArray(bulletEdits.summary_additions) ? bulletEdits.summary_additions : [];
+bulletEdits.skills_additions = Array.isArray(bulletEdits.skills_additions) ? bulletEdits.skills_additions : [];
+
+
 // --- Compose final resume text from original sections + edits ---
 function composeFinalResume(originalSections, bulletEdits) {
   // apply bullet edits
@@ -374,12 +380,12 @@ function composeFinalResume(originalSections, bulletEdits) {
 
         
         // --- FINAL, RELIABLE SCORING ---
-        // --- FINAL, EXPLAINABLE SCORING ---
+ // --- FINAL, EXPLAINABLE SCORING ---
+const finalResume = composeFinalResume(sections.sections, bulletEdits);
 const originalMeta = parseSections(masterInventory);
 const rewrittenMeta = parseSections(finalResume);
 const jdKeywords = keywords.map(k => ({ term: k, type: 'hard' })); // MVP typing
 
-const finalResume = composeFinalResume(sections.sections, bulletEdits);
 const originalEval = scoreResume(masterInventory, jdKeywords, originalMeta);
 const optimizedEval = scoreResume(finalResume, jdKeywords, rewrittenMeta);
 
