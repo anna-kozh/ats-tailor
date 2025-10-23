@@ -153,17 +153,31 @@ async function callOpenAIJSON(apiKey, model, systemPrompt, userPrompt, schema, t
 }
 
 // NOTE: generic chat helper (JSON or text)
+// NOTE: generic chat helper (JSON or text)
 const callOpenAI = async (apiKey, model, systemPrompt, userPrompt, isJson = true) => {
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userPrompt }
+  ];
+
+  // OpenAI requires the word "json" in messages when using response_format: json_object
+  if (isJson) {
+    messages.unshift({
+      role: 'system',
+      content: 'Return JSON only. Output must be valid JSON with no extra text.'
+    });
+  }
+
   const body = {
     model,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt }
-    ],
+    messages,
     temperature: 0.2,
-    max_tokens: 1800,
+    max_tokens: 1800
   };
-  if (isJson) body.response_format = { type: "json_object" };
+
+  if (isJson) {
+    body.response_format = { type: "json_object" };
+  }
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -179,6 +193,7 @@ const callOpenAI = async (apiKey, model, systemPrompt, userPrompt, isJson = true
 
   const data = await response.json();
   const content = data.choices[0].message.content;
+
   try {
     return isJson ? JSON.parse(content) : content;
   } catch (e) {
@@ -186,6 +201,7 @@ const callOpenAI = async (apiKey, model, systemPrompt, userPrompt, isJson = true
     throw new Error("AI returned malformed JSON despite instruction.");
   }
 };
+
 
 exports.handler = async function (event) {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -200,7 +216,8 @@ exports.handler = async function (event) {
 
     // --- PASS 1: KEYWORD EXTRACTION ---
     const keywordModel = 'gpt-4o';
-    const keywordSystemPrompt = `You are an AI data analyst. Extract the 15 most important REQUIRED keywords and skills from the job description. Return {"keywords":["..."]} only.`;
+    const keywordSystemPrompt = `You are an AI data analyst. Extract the 15 most important REQUIRED keywords and skills from the job description.
+Return JSON exactly in this shape: {"keywords":["..."]} Only JSON, no extra text.`;
     const keywordUserPrompt = `JOB DESCRIPTION:\n${jobDescription}\n\nCOMPANY VALUES (optional):\n${companyValues || 'Not provided.'}`;
     const { keywords } = await callOpenAI(apiKey, keywordModel, keywordSystemPrompt, keywordUserPrompt);
     if (!keywords || keywords.length === 0) throw new Error("Keyword extraction failed or returned no keywords.");
