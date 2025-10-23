@@ -235,9 +235,9 @@ exports.handler = async function(event) {
 const sections = parseSections(masterInventory);
 const plannerSystem = `You are mapping JD keywords to the candidate's existing WORK EXPERIENCE bullets.
 Rules:
-- Prefer mapping to an existing bullet in WORK EXPERIENCE when evidence exists.
-- Only map to Summary/Skills if there is no suitable bullet.
-- If no evidence for a keyword anywhere, mark as "skip".
+- Prefer mapping to an existing bullet in WORK EXPERIENCE when evidence exists and confidence is high or medium.
+- Only map to Summary/Skills if there is no suitable bullet, but confidence still needs to be high or medium.
+- If no evidence (low confidence) for a keyword anywhere, mark as "skip".
 - Never invent facts.`;
 const plannerUser = `KEYWORDS: ${keywords.join(', ')}
 
@@ -298,16 +298,12 @@ Follow the provided Placement Plan strictly.
 - If target=skip, do not use the keyword anywhere.
 Limit to one keyword phrase per bullet.
 Do not repeat the same keyword across bullets unless the meaning is different.
-At least 60% of used keywords must appear in Work Experience bullets.
 Do not add a keyword to Skills if it already appears in Experience.
 
-Follow the provided Placement Plan strictly:
-- If target=experience with bullet_index=N, edit that bullet to naturally include the keyword.
-- If target=summary or skills, place there only once.
-- If target=skip, do not use the keyword anywhere.
-At least 60% of used keywords must appear in Work Experience bullets.
-Do not add a keyword to Skills if it already appears in Experience.
-
+** Ideal keyword distribution:
+Summary: 20-25%
+Each job (on average): Total  50-60%
+Skills: 25-30%
 
 ** Bias & Fairness Handling:
 Detect and replace biased or exclusionary wording (e.g., gendered verbs, age-coded phrases, cultural idioms) with neutral, outcome-focused alternatives.
