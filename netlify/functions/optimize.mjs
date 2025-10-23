@@ -425,7 +425,7 @@ if (usedTotal > 0 && (usedInExperience / usedTotal) < 0.6) {
   // Optional: trigger a second writer pass with a stronger instruction or show a UI warning.
 }
 
-// --- helper to list missing keywords for UI highlight (ONLY CHANGE ADDED) ---
+
 function getMissingFromEval(keywords, optimizedEval){
   const norm = s => String(s || '').toLowerCase().trim();
   const zeroes = new Set(
@@ -436,6 +436,8 @@ function getMissingFromEval(keywords, optimizedEval){
   return (keywords || []).filter(k => zeroes.has(norm(k)));
 }
 
+
+
 return {
     statusCode: 200,
     body: JSON.stringify({
@@ -443,7 +445,7 @@ return {
         originalScore: originalEval.score,
         optimizedScore: optimizedEval.score,
         keywords,
-        // expose missing so UI can highlight in red
+        // NEW: expose missing so UI can highlight in red
         missing: getMissingFromEval(keywords, optimizedEval),
         originalScoreBreakdown: originalEval.breakdown,
         optimizedScoreBreakdown: optimizedEval.breakdown
