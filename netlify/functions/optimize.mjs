@@ -140,6 +140,27 @@ function parseSections(text) {
   return { sections: { summary, skills, experience } };
 }
 
+// --- JSON helper (strict schema) ---
+async function callOpenAIJSON(apiKey, model, systemPrompt, userPrompt, schema, temperature=0.2, max_tokens=900){
+  const body = {
+    model,
+    messages: [{role:'system', content: systemPrompt},{role:'user', content: userPrompt}],
+    temperature,
+    max_tokens,
+    response_format: { type: "json_schema", json_schema: { name: "placement_plan", schema, strict: true } }
+  };
+  const res = await fetch('https://api.openai.com/v1/chat/completions',{
+    method:'POST',
+    headers:{ 'Authorization': `Bearer ${apiKey}`, 'Content-Type':'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json().catch(()=> ({}));
+  if (!res.ok) throw new Error(data?.error?.message || `HTTP ${res.status}`);
+  return JSON.parse(data?.choices?.[0]?.message?.content || '{}');
+}
+
+
+
 // NOTE: Added 'model' parameter to specify which OpenAI model to use
 const callOpenAI = async (apiKey, model, systemPrompt, userPrompt, isJson = true) => {
     const body = {
@@ -210,6 +231,48 @@ exports.handler = async function(event) {
             throw new Error("Keyword extraction failed or returned no keywords.");
         }
 
+// --- PASS 1b: PLACEMENT PLANNER (map keywords to specific bullets) ---
+const sections = parseSections(masterInventory);
+const plannerSystem = `You are mapping JD keywords to the candidate's existing WORK EXPERIENCE bullets.
+Rules:
+- Prefer mapping to an existing bullet in WORK EXPERIENCE when evidence exists.
+- Only map to Summary/Skills if there is no suitable bullet.
+- If no evidence for a keyword anywhere, mark as "skip".
+- Never invent facts.`;
+const plannerUser = `KEYWORDS: ${keywords.join(', ')}
+
+WORK EXPERIENCE BULLETS:
+${sections.sections.experience.map((e,i)=>`[${i}] ${e.text}`).join('\n')}
+
+Return JSON:
+{ "placements": [
+  { "keyword": "string", "target": "experience|summary|skills|skip", "bullet_index": number|null, "evidence": "exact phrase from candidate text (or empty)" }
+] }`;
+const planSchema = {
+  type:"object",
+  properties:{
+    placements:{
+      type:"array",
+      items:{
+        type:"object",
+        properties:{
+          keyword:{type:"string"},
+          target:{type:"string", enum:["experience","summary","skills","skip"]},
+          bullet_index:{type:["integer","null"]},
+          evidence:{type:"string"}
+        },
+        required:["keyword","target","bullet_index","evidence"],
+        additionalProperties:false
+      }
+    }
+  },
+  required:["placements"],
+  additionalProperties:false
+};
+const placementPlan = await callOpenAIJSON(apiKey, 'gpt-4o', plannerSystem, plannerUser, planSchema);
+
+
+
         // --- PASS 2: THE GUARDED WRITER with Word Limits ---
         // KEEPING gpt-4o FOR HIGH-QUALITY, COMPLEX WRITING
         const writerModel = 'gpt-4o'; 
@@ -229,11 +292,21 @@ Only reuse facts that exist in the candidate text. If a keyword is not clearly s
 
 
 ** Keyword Distribution:
-Spread aligned keywords across bullet points, summary, and skills.
-Prioritize natural, contextual use within work experience, not keyword stuffing.
+Follow the provided Placement Plan strictly.
+- If target=experience with bullet_index=N, rewrite that bullet N in place to naturally include the keyword.
+- If target=summary or skills, include that keyword once only.
+- If target=skip, do not use the keyword anywhere.
 Limit to one keyword phrase per bullet.
 Do not repeat the same keyword across bullets unless the meaning is different.
-Budget keywords: 60% in Experience, 25% in Summary, 15% in Skills.
+At least 60% of used keywords must appear in Work Experience bullets.
+Do not add a keyword to Skills if it already appears in Experience.
+
+Follow the provided Placement Plan strictly:
+- If target=experience with bullet_index=N, edit that bullet to naturally include the keyword.
+- If target=summary or skills, place there only once.
+- If target=skip, do not use the keyword anywhere.
+At least 60% of used keywords must appear in Work Experience bullets.
+Do not add a keyword to Skills if it already appears in Experience.
 
 
 ** Bias & Fairness Handling:
@@ -273,8 +346,24 @@ A single text block containing:
 *** Work Experience (each job with rewritten bullet points)
 *** Skills
         `;
-        const writerUserPrompt = `**CRITICAL KEYWORDS TO INCLUDE:**\n${keywords.join(', ')}\n\n---\n\n**JOB DESCRIPTION (for context):**\n${jobDescription}\n\n---\n\n**CANDIDATE'S FULL EXPERIENCE INVENTORY (PRESERVE FACTS):**\n${masterInventory}`;
-        
+const writerUserPrompt = `CRITICAL KEYWORDS (context only): 
+${keywords.join(', ')}
+
+PLACEMENT PLAN (must follow exactly):
+${JSON.stringify(placementPlan, null, 2)}
+
+JOB DESCRIPTION (context only):
+${jobDescription}
+
+CANDIDATE TEXT (facts source of truth):
+${masterInventory}
+
+EDIT INSTRUCTIONS:
+- Keep bullet order. For each placement with target="experience" and bullet_index=N, rewrite that bullet N in place, weaving the keyword naturally while preserving the original claim.
+- If a placement targets "summary" or "skills", include it once only.
+- If a placement is "skip", ignore that keyword entirely.
+- Never fabricate metrics, tools, titles, or ownership beyond the source text.`;
+
         const finalResume = await callOpenAI(apiKey, writerModel, writerSystemPrompt, writerUserPrompt, false);
         
         // --- FINAL, RELIABLE SCORING ---
@@ -286,6 +375,15 @@ const jdKeywords = keywords.map(k => ({ term: k, type: 'hard' })); // MVP typing
 const originalEval = scoreResume(masterInventory, jdKeywords, originalMeta);
 const optimizedEval = scoreResume(finalResume, jdKeywords, rewrittenMeta);
 
+// Ensure ≥60% of used keywords landed in Experience
+const used = optimizedEval.breakdown.filter(b => b.contribution > 0);
+const usedInExp = used.filter(b => b.section === 'experience').length;
+const placementWarning = (used.length > 0 && (usedInExp / used.length) < 0.6)
+  ? 'Keywords concentrated outside Experience. Consider retrying with stricter plan.'
+  : null;
+
+
+
 return {
     statusCode: 200,
     body: JSON.stringify({
@@ -294,9 +392,11 @@ return {
         optimizedScore: optimizedEval.score,
         keywords,
         originalScoreBreakdown: originalEval.breakdown,
-        optimizedScoreBreakdown: optimizedEval.breakdown
+        optimizedScoreBreakdown: optimizedEval.breakdown,
+        placementWarning
     })
 };
+
 
     } catch (error) {
         console.error('Function Error:', error);
