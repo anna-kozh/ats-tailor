@@ -111,6 +111,9 @@ Example:
 - Integrate relevant job description keywords only when there’s high confidence the candidate truly has that experience.
 - Never fabricate achievements, metrics, or ownership.
 - If unclear or unsupported, skip it.
+- Only include a keyword if there is clear factual evidence or strong activity proof in the candidate’s text. 
+- Do NOT infer experience from job titles, adjacent skills, or vague associations (e.g., working with recruiters ≠ “hirer workflow”). 
+- If a keyword cannot be directly supported by explicit actions, deliverables, or context, skip it — even if it seems relevant.
 
 3. KEYWORD DISTRIBUTION
 - Spread keywords across Summary, Experience, and Skills.
